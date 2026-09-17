@@ -6,7 +6,72 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-use super::{logger, models::deployment::{Deployment, DeploymentType}};
+use super::{logger, models::deployment::{Deployment, DeploymentType}, registry::DeploymentStatus};
+
+/// Query live Docker state for a deployment
+pub fn check_status(deployment: &Deployment) -> DeploymentStatus {
+    match &deployment.deployment_type {
+        DeploymentType::Dockerfile => check_docker_status(&deployment.name),
+        DeploymentType::DockerCompose => check_compose_status(deployment),
+    }
+}
+
+fn check_docker_status(name: &str) -> DeploymentStatus {
+    let Ok(out) = Command::new("docker")
+        .args(["inspect", "--format", "{{.State.Running}} {{.State.ExitCode}}", name])
+        .output()
+    else {
+        return DeploymentStatus::Unknown;
+    };
+
+    if !out.status.success() {
+        return DeploymentStatus::Unknown;
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    match text.trim().splitn(2, ' ').collect::<Vec<_>>().as_slice() {
+        ["true", _]    => DeploymentStatus::Running,
+        ["false", "0"] => DeploymentStatus::Stopped,
+        ["false", _]   => DeploymentStatus::Errored,
+        _              => DeploymentStatus::Unknown,
+    }
+}
+
+fn check_compose_status(deployment: &Deployment) -> DeploymentStatus {
+    let Some(file_str) = deployment.file_path.to_str() else {
+        return DeploymentStatus::Unknown;
+    };
+
+    let Ok(out) = Command::new("docker")
+        .args(["compose", "-f", file_str, "-p", &deployment.name, "ps", "--all"])
+        .output()
+    else {
+        return DeploymentStatus::Unknown;
+    };
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut has_running = false;
+    let mut has_errored = false;
+    let mut has_any = false;
+
+    for line in text.lines().skip(1) {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        has_any = true;
+        if line.contains(" Up ") || line.contains(" running") {
+            has_running = true;
+        } else if line.contains("Exited (0)") {
+            // stopped cleanly — not an error
+        } else if line.contains("Exited") {
+            has_errored = true;
+        }
+    }
+
+    if !has_any       { DeploymentStatus::Unknown }
+    else if has_running { DeploymentStatus::Running }
+    else if has_errored { DeploymentStatus::Errored }
+    else               { DeploymentStatus::Stopped }
+}
 
 /// Check whether a Docker image with the given name exists locally
 pub fn image_exists(name: &str) -> bool {
