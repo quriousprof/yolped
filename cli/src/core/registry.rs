@@ -7,12 +7,24 @@ use serde::{Deserialize, Serialize};
 const REGISTRY_DIR: &str = ".justdeploy";
 const REGISTRY_FILE: &str = "registry.json";
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DeploymentStatus {
+    Running,
+    Stopped,
+    Errored,
+    #[default]
+    Unknown,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RegistryEntry {
     pub config_path: PathBuf,
     pub registered_at: DateTime<Utc>,
     pub last_built_at: Option<DateTime<Utc>>,
     pub last_deployed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub status: DeploymentStatus,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -56,28 +68,25 @@ impl Registry {
                 registered_at: Utc::now(),
                 last_built_at: None,
                 last_deployed_at: None,
+                status: DeploymentStatus::Unknown,
             });
         }
     }
 
-    /// Update the last_deployed_at timestamp for a tracked entry.
+    pub fn update_status(&mut self, config_path: &PathBuf, status: DeploymentStatus) {
+        if let Some(entry) = self.deployments.iter_mut().find(|e| &e.config_path == config_path) {
+            entry.status = status;
+        }
+    }
+
     pub fn mark_deployed(&mut self, config_path: &PathBuf) {
-        if let Some(entry) = self
-            .deployments
-            .iter_mut()
-            .find(|e| &e.config_path == config_path)
-        {
+        if let Some(entry) = self.deployments.iter_mut().find(|e| &e.config_path == config_path) {
             entry.last_deployed_at = Some(Utc::now());
         }
     }
 
-    /// Update the last_built_at timestamp for a tracked entry.
     pub fn mark_built(&mut self, config_path: &PathBuf) {
-        if let Some(entry) = self
-            .deployments
-            .iter_mut()
-            .find(|e| &e.config_path == config_path)
-        {
+        if let Some(entry) = self.deployments.iter_mut().find(|e| &e.config_path == config_path) {
             entry.last_built_at = Some(Utc::now());
         }
     }
