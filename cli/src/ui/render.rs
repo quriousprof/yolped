@@ -11,7 +11,7 @@ pub fn render(_app: &mut App, frame: &mut Frame) {
 
     let [title_area, _body_area] = frame.area().layout(&layout);
 
-    let title = Line::from("JustDeploy - Deployments made easy!").centered().bold();
+    let title = Line::from("Yolped - Deployments made easy!").centered().bold();
     
     // rendering widgets
     frame.render_widget(title, title_area);

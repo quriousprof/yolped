@@ -13,7 +13,7 @@ use crate::core::{
 };
 
 pub fn run(down: bool) -> Result<()> {
-    let config_path = env::current_dir()?.join("jd.json");
+    let config_path = env::current_dir()?.join("yolped.json");
     let config = JdConfig::load()?;
     let deployment_args = config.deployment_args.clone();
 
@@ -60,7 +60,7 @@ fn ensure_built(config_path: &PathBuf, deployment: &Deployment) -> Result<()> {
     };
 
     if !is_built {
-        logger::info("No build found. Running `jd build` first...");
+        logger::info("No build found. Running `yolped build` first...");
         println!();
         runner::build(deployment)?;
         let mut registry = Registry::load()?;

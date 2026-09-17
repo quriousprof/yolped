@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-/// JustDeploy — Deployments made easy
+/// Yolped — Deployments made easy
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -10,9 +10,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Initialize a new JustDeploy configuration (jd.json)
+    /// Initialize a new Yolped configuration (yolped.json)
     Setup,
-    /// Build the deployment using the project's jd.json config
+    /// Build the deployment using the project's yolped.json config
     Build,
     /// Build and run the deployment on the local machine
     Deploy {
@@ -25,7 +25,7 @@ pub enum Commands {
     },
     /// Stream logs for a deployment by name, or for the current directory's project
     Logs {
-        /// Name of the deployment (defaults to current directory's jd.json)
+        /// Name of the deployment (defaults to current directory's yolped.json)
         name: Option<String>,
     },
     /// List all registered deployments

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::deployment::{DeploymentType, ServerType};
 
-pub const CONFIG_FILE: &str = "jd.json";
+pub const CONFIG_FILE: &str = "yolped.json";
 
-/// Persisted configuration written to jd.json
+/// Persisted configuration written to yolped.json
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JdConfig {
     pub name: String,
@@ -26,7 +26,7 @@ impl JdConfig {
     pub fn load() -> Result<Self> {
         let path = PathBuf::from(CONFIG_FILE);
         if !path.exists() {
-            bail!("No configuration file found for this project. Run `jd setup` first.");
+            bail!("No configuration file found for this project. Run `yolped setup` first.");
         }
         Self::load_from(&path)
     }

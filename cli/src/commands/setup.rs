@@ -17,7 +17,7 @@ use crate::core::{
 };
 
 pub fn run() -> Result<()> {
-    logger::info("Setting up JustDeploy configuration...");
+    logger::info("Setting up Yolped configuration...");
     println!();
 
     let name = {
@@ -54,16 +54,16 @@ pub fn run() -> Result<()> {
 
     let config_path = env::current_dir()
         .context("Failed to determine current directory")?
-        .join("jd.json");
+        .join("yolped.json");
 
     if config_path.exists() {
         let backup = config_path.with_extension("json.old");
-        fs::rename(&config_path, &backup).context("Failed to back up existing jd.json")?;
+        fs::rename(&config_path, &backup).context("Failed to back up existing yolped.json")?;
         logger::info(&format!("Previous config saved to '{}'", backup.display()));
     }
 
     let json = serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
-    fs::write(&config_path, &json).context("Failed to write jd.json")?;
+    fs::write(&config_path, &json).context("Failed to write yolped.json")?;
 
     let mut registry = Registry::load()?;
     registry.upsert(config_path.clone());

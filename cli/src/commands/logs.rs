@@ -42,7 +42,7 @@ fn find_by_name(name: &str) -> Result<Deployment> {
     }
 
     bail!(
-        "No deployment named '{}' found. Run `jd list` to see all deployments.",
+        "No deployment named '{}' found. Run `yolped list` to see all deployments.",
         name
     )
 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-const REGISTRY_DIR: &str = ".justdeploy";
+const REGISTRY_DIR: &str = ".yolped";
 const REGISTRY_FILE: &str = "registry.json";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
@@ -51,7 +51,7 @@ impl Registry {
         let path = Self::path()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
-                .context("Failed to create ~/.justdeploy directory")?;
+                .context("Failed to create ~/.yolped directory")?;
         }
         let json =
             serde_json::to_string_pretty(self).context("Failed to serialize registry")?;

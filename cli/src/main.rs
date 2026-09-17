@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
         Commands::List => commands::list::run()?,
         Commands::Build => {
-            let config_path = std::env::current_dir()?.join("jd.json");
+            let config_path = std::env::current_dir()?.join("yolped.json");
             let config = JdConfig::load()?;
             let deployment = Deployment::new(
                 config.name,

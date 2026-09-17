@@ -11,7 +11,7 @@ pub fn run() -> anyhow::Result<()> {
 
     if registry.deployments.is_empty() {
         crate::core::logger::info(
-            "No deployments registered. Run `jd setup` in a project directory.",
+            "No deployments registered. Run `yolped setup` in a project directory.",
         );
         return Ok(());
     }

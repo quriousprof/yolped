@@ -1,16 +1,16 @@
 [package]
-name = "justdeploy"
+name = "yolped"
 version = "0.1.0"
 description = "A rust based deployment control panel"
 authors = ["Soham Ghugare <soham.ghugare@gmail.com>"]
 license = "MIT"
 categories = ["development-tools"]
-repository = "https://github.com/quriousprof/justdeploy"
+repository = "https://github.com/quriousprof/yolped"
 edition = "2024"
 readme = "../README.md"
 
 [[bin]]
-name = "jd"
+name = "yolped"
 path = "src/main.rs"
 
 [dependencies]
