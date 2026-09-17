@@ -8,7 +8,7 @@ use crate::core::{
         config::JdConfig,
         deployment::{Deployment, DeploymentType, ServerType},
     },
-    registry::Registry,
+    registry::{DeploymentStatus, Registry},
     runner,
 };
 
@@ -26,12 +26,21 @@ pub fn run(down: bool) -> Result<()> {
 
     if down {
         runner::stop(&deployment)?;
+        let mut registry = Registry::load()?;
+        registry.update_status(&config_path, DeploymentStatus::Stopped);
+        registry.save()?;
     } else {
         ensure_built(&config_path, &deployment)?;
-        runner::deploy(&deployment, &deployment_args)?;
+        let deploy_result = runner::deploy(&deployment, &deployment_args);
+        let status = match &deploy_result {
+            Ok(_) => runner::check_status(&deployment),
+            Err(_) => DeploymentStatus::Errored,
+        };
         let mut registry = Registry::load()?;
         registry.mark_deployed(&config_path);
+        registry.update_status(&config_path, status);
         registry.save()?;
+        deploy_result?;
     }
 
     Ok(())
