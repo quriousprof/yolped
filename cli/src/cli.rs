@@ -25,6 +25,9 @@ pub enum Commands {
         /// Stop and remove the running containers
         #[arg(long, conflicts_with = "up")]
         down: bool,
+        /// Force deployment on the local machine, ignoring server config
+        #[arg(long)]
+        local: bool,
     },
     /// Stream logs for a deployment by name, or for the current directory's project
     Logs {

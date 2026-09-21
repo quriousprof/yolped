@@ -30,7 +30,7 @@ fn main() -> Result<()> {
             None => commands::setup::run()?,
             Some(SetupSubcommand::Server) => commands::setup::run_server()?,
         },
-        Commands::Deploy { down, .. } => commands::deploy::run(down)?,
+        Commands::Deploy { down, local, .. } => commands::deploy::run(down, local)?,
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
         Commands::List => commands::list::run()?,
         Commands::Build => {

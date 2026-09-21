@@ -14,7 +14,7 @@ use crate::core::{
     ssh::SshConnection,
 };
 
-pub fn run(down: bool) -> Result<()> {
+pub fn run(down: bool, force_local: bool) -> Result<()> {
     let config_path = env::current_dir()?.join("yolped.json");
     let config = JdConfig::load()?;
     let deployment_args = config.deployment_args.clone();
@@ -26,6 +26,10 @@ pub fn run(down: bool) -> Result<()> {
         String::new(),
         server.clone(),
     )?;
+
+    if force_local {
+        return run_local(down, &config_path, &deployment, &deployment_args);
+    }
 
     match server {
         ServerType::Local => run_local(down, &config_path, &deployment, &deployment_args)?,
