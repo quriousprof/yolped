@@ -120,6 +120,13 @@ impl SshConnection {
         Ok(path.replacen('~', &home, 1))
     }
 
+    /// Return true if a file exists at the given remote path.
+    pub fn file_exists(&self, path: &str) -> bool {
+        self.exec_output(&format!("test -f '{}' && echo 1 || echo 0", path))
+            .map(|s| s.trim() == "1")
+            .unwrap_or(false)
+    }
+
     /// Create a directory (and parents) on the remote.
     pub fn mkdir_p(&self, path: &str) -> Result<()> {
         let code = self.exec_stream(&format!("mkdir -p '{}'", path))?;
