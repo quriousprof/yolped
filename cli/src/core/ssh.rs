@@ -7,7 +7,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use ssh2::Session;
 
-use super::models::deployment::{RemoteServer, SshAuth};
+use super::{logger, models::deployment::{RemoteServer, SshAuth}};
 
 pub struct SshConnection {
     session: Session,
@@ -16,6 +16,8 @@ pub struct SshConnection {
 impl SshConnection {
     pub fn connect(server: &RemoteServer) -> Result<Self> {
         let addr = format!("{}:22", server.ip);
+        logger::info(&format!("Connecting to {}@{}...", server.user, server.ip));
+
         let tcp = TcpStream::connect(&addr)
             .with_context(|| format!("Failed to connect to {}", addr))?;
 
@@ -44,6 +46,7 @@ impl SshConnection {
             bail!("Authentication failed for {}@{}", server.user, server.ip);
         }
 
+        logger::success(&format!("Connected to {}@{}", server.user, server.ip));
         Ok(Self { session })
     }
 

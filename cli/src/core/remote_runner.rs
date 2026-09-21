@@ -10,7 +10,8 @@ use super::{
 
 /// Verify Docker is installed on the remote server.
 pub fn check_docker(conn: &SshConnection) -> Result<()> {
-    let code = conn.exec_stream("docker --version > /dev/null 2>&1")?;
+    logger::info("Checking Docker on remote...");
+    let code = conn.exec_stream("docker --version 2>&1")?;
     if code != 0 {
         bail!(
             "Docker is not installed on the remote server.\n\
@@ -33,12 +34,14 @@ pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) ->
 
     let remote_file = format!("{}/{}", remote_dir, filename);
 
+    logger::info(&format!("Preparing remote directory '{}'...", remote_dir));
     conn.mkdir_p(remote_dir)?;
+
+    logger::info(&format!("Uploading '{}'...", filename));
     conn.upload(&deployment.file_path, &remote_file)
         .with_context(|| format!("Failed to upload '{}'", deployment.file_path.display()))?;
 
-    logger::info(&format!("Uploaded '{}' to remote", filename));
-
+    println!();
     let cmd = match &deployment.deployment_type {
         DeploymentType::Dockerfile => format!(
             "docker build -f '{}' -t '{}' '{}'",
@@ -55,6 +58,7 @@ pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) ->
         bail!("Remote build failed (exit code: {})", code);
     }
 
+    println!();
     logger::success(&format!("'{}' built successfully on remote!", deployment.name));
     Ok(())
 }
@@ -89,7 +93,10 @@ pub fn deploy(
         ),
     };
 
+    logger::info("Starting containers...");
+    println!();
     let code = conn.exec_stream(&cmd)?;
+    println!();
     if code != 0 {
         bail!("Remote deploy failed (exit code: {})", code);
     }

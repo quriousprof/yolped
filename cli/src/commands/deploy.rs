@@ -34,6 +34,8 @@ pub fn run(down: bool, force_local: bool) -> Result<()> {
     match server {
         ServerType::Local => run_local(down, &config_path, &deployment, &deployment_args)?,
         ServerType::Remote(ref remote) => {
+            logger::info(&format!("Deploying to {}@{}...", remote.user, remote.ip));
+            println!();
             let conn = SshConnection::connect(remote)?;
             run_remote(down, &config_path, &deployment, &deployment_args, &conn, &remote.remote_dir)?;
         }
