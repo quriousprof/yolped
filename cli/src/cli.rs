@@ -11,7 +11,10 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Initialize a new Yolped configuration (yolped.json)
-    Setup,
+    Setup {
+        #[command(subcommand)]
+        subcommand: Option<SetupSubcommand>,
+    },
     /// Build the deployment using the project's yolped.json config
     Build,
     /// Build and run the deployment on the local machine
@@ -30,4 +33,10 @@ pub enum Commands {
     },
     /// List all registered deployments
     List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SetupSubcommand {
+    /// Reconfigure only the server settings for an existing project
+    Server,
 }

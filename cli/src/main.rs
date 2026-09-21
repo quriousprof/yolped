@@ -11,7 +11,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::{
-    cli::{Cli, Commands},
+    cli::{Cli, Commands, SetupSubcommand},
     core::{
         models::{
             config::JdConfig,
@@ -26,7 +26,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Setup => commands::setup::run()?,
+        Commands::Setup { subcommand } => match subcommand {
+            None => commands::setup::run()?,
+            Some(SetupSubcommand::Server) => commands::setup::run_server()?,
+        },
         Commands::Deploy { down, .. } => commands::deploy::run(down)?,
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
         Commands::List => commands::list::run()?,
