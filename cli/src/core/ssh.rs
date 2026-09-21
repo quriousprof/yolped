@@ -1,7 +1,9 @@
 use std::{
-    io::{Read, Write},
+    io::{self, ErrorKind, Read, Write},
     net::TcpStream,
     path::Path,
+    thread,
+    time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
@@ -50,7 +52,7 @@ impl SshConnection {
         Ok(Self { session })
     }
 
-    /// Execute a command and stream its stdout to the terminal live.
+    /// Execute a command and stream stdout + stderr to the terminal in real-time.
     /// Returns the exit code.
     pub fn exec_stream(&self, cmd: &str) -> Result<i32> {
         let mut channel = self
@@ -61,28 +63,61 @@ impl SshConnection {
             .exec(cmd)
             .with_context(|| format!("Failed to exec: {}", cmd))?;
 
-        // Stream stdout live
+        // Switch to non-blocking so we can poll both stdout and stderr
+        // interleaved, giving real-time output.
+        self.session.set_blocking(false);
+
         let mut buf = [0u8; 4096];
+        let mut sbuf = [0u8; 4096];
+
         loop {
+            let mut activity = false;
+
+            // --- stdout ---
             match channel.read(&mut buf) {
-                Ok(0) => break,
+                Ok(0) => {}
                 Ok(n) => {
-                    std::io::stdout().write_all(&buf[..n])?;
-                    std::io::stdout().flush()?;
+                    io::stdout().write_all(&buf[..n])?;
+                    io::stdout().flush()?;
+                    activity = true;
                 }
-                Err(e) => return Err(e.into()),
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    self.session.set_blocking(true);
+                    return Err(e.into());
+                }
+            }
+
+            // --- stderr ---
+            {
+                let mut stderr = channel.stderr();
+                match stderr.read(&mut sbuf) {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        io::stderr().write_all(&sbuf[..n])?;
+                        io::stderr().flush()?;
+                        activity = true;
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(e) => {
+                        self.session.set_blocking(true);
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            // EOF from remote + no pending data → done
+            if channel.eof() && !activity {
+                break;
+            }
+
+            // Yield briefly when idle to avoid burning CPU
+            if !activity {
+                thread::sleep(Duration::from_millis(10));
             }
         }
 
-        // Drain stderr after stdout is done
-        {
-            let mut stderr_buf = Vec::new();
-            channel.stderr().read_to_end(&mut stderr_buf)?;
-            if !stderr_buf.is_empty() {
-                std::io::stderr().write_all(&stderr_buf)?;
-            }
-        }
-
+        self.session.set_blocking(true);
         channel.wait_close().context("Failed to wait for channel close")?;
         Ok(channel.exit_status()?)
     }
