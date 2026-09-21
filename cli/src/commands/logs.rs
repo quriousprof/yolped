@@ -54,7 +54,8 @@ fn stream_logs(config: JdConfig) -> Result<()> {
         ServerType::Local => runner::logs(&deployment),
         ServerType::Remote(ref remote) => {
             let conn = SshConnection::connect(remote)?;
-            remote_runner::logs(&deployment, &conn, &remote.remote_dir)
+            let remote_dir = conn.expand_path(&remote.remote_dir)?;
+            remote_runner::logs(&deployment, &conn, &remote_dir)
         }
     }
 }

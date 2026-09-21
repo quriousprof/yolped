@@ -79,6 +79,7 @@ fn run_remote(
     conn: &SshConnection,
     remote_dir: &str,
 ) -> Result<()> {
+    let remote_dir = &conn.expand_path(remote_dir)?;
     remote_runner::check_docker(conn)?;
 
     if down {
@@ -133,6 +134,7 @@ fn ensure_built_remote(
     conn: &SshConnection,
     remote_dir: &str,
 ) -> Result<()> {
+    let remote_dir = &conn.expand_path(remote_dir)?;
     let is_built = match &deployment.deployment_type {
         DeploymentType::Dockerfile => remote_runner::image_exists(deployment, conn),
         DeploymentType::DockerCompose => Registry::load()?

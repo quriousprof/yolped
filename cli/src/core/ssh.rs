@@ -97,6 +97,29 @@ impl SshConnection {
         .unwrap_or(false)
     }
 
+    /// Capture stdout of a command as a string (does not print to terminal).
+    pub fn exec_output(&self, cmd: &str) -> Result<String> {
+        let mut channel = self
+            .session
+            .channel_session()
+            .context("Failed to open SSH channel")?;
+        channel.exec(cmd).with_context(|| format!("Failed to exec: {}", cmd))?;
+
+        let mut output = String::new();
+        channel.read_to_string(&mut output)?;
+        channel.wait_close()?;
+        Ok(output.trim().to_string())
+    }
+
+    /// Expand a leading `~` to the remote user's home directory.
+    pub fn expand_path(&self, path: &str) -> Result<String> {
+        if !path.starts_with('~') {
+            return Ok(path.to_string());
+        }
+        let home = self.exec_output("echo $HOME")?;
+        Ok(path.replacen('~', &home, 1))
+    }
+
     /// Create a directory (and parents) on the remote.
     pub fn mkdir_p(&self, path: &str) -> Result<()> {
         let code = self.exec_stream(&format!("mkdir -p '{}'", path))?;
