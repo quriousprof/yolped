@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, path::{Path, PathBuf}};
 
 use anyhow::{bail, Context, Result};
 
@@ -22,7 +22,61 @@ pub fn check_docker(conn: &SshConnection) -> Result<()> {
     Ok(())
 }
 
+/// Parse all `env_file` paths referenced in a docker-compose file.
+/// Returns paths relative to the compose file's directory.
+pub fn parse_env_files(compose_path: &Path) -> Result<Vec<PathBuf>> {
+    let contents = std::fs::read_to_string(compose_path)
+        .with_context(|| format!("Failed to read '{}'", compose_path.display()))?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&contents)
+        .with_context(|| format!("Failed to parse '{}'", compose_path.display()))?;
+
+    let compose_dir = compose_path.parent().unwrap_or(Path::new("."));
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+
+    let Some(services) = value.get("services").and_then(|s| s.as_mapping()) else {
+        return Ok(paths);
+    };
+
+    for service in services.values() {
+        let env_file = match service.get("env_file") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let raw: Vec<String> = match env_file {
+            serde_yaml::Value::String(s) => vec![s.clone()],
+            serde_yaml::Value::Sequence(seq) => seq
+                .iter()
+                .filter_map(|item| match item {
+                    serde_yaml::Value::String(s) => Some(s.clone()),
+                    serde_yaml::Value::Mapping(m) => m
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+
+        for s in raw {
+            let resolved = compose_dir.join(&s);
+            // Normalize to avoid duplicates from `./x` vs `x`
+            let key = resolved
+                .canonicalize()
+                .unwrap_or_else(|_| resolved.clone());
+            if seen.insert(key) {
+                paths.push(resolved);
+            }
+        }
+    }
+
+    Ok(paths)
+}
+
 /// Build the deployment image on the remote server.
+/// Files must already be uploaded before calling this.
 pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
     logger::info(&format!("Building '{}' on remote...", deployment.name));
 
@@ -33,13 +87,6 @@ pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) ->
         .context("Invalid file name in file_path")?;
 
     let remote_file = format!("{}/{}", remote_dir, filename);
-
-    logger::info(&format!("Preparing remote directory '{}'...", remote_dir));
-    conn.mkdir_p(remote_dir)?;
-
-    logger::info(&format!("Uploading '{}'...", filename));
-    conn.upload(&deployment.file_path, &remote_file)
-        .with_context(|| format!("Failed to upload '{}'", deployment.file_path.display()))?;
 
     println!();
     let cmd = match &deployment.deployment_type {
