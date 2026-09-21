@@ -8,6 +8,19 @@ use super::{
     ssh::SshConnection,
 };
 
+/// Verify Docker is installed on the remote server.
+pub fn check_docker(conn: &SshConnection) -> Result<()> {
+    let code = conn.exec_stream("docker --version > /dev/null 2>&1")?;
+    if code != 0 {
+        bail!(
+            "Docker is not installed on the remote server.\n\
+             Install Docker first, then rerun `yolped deploy`.\n\
+             See: https://docs.docker.com/engine/install/"
+        );
+    }
+    Ok(())
+}
+
 /// Build the deployment image on the remote server.
 pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
     logger::info(&format!("Building '{}' on remote...", deployment.name));

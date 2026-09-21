@@ -73,6 +73,8 @@ fn run_remote(
     conn: &SshConnection,
     remote_dir: &str,
 ) -> Result<()> {
+    remote_runner::check_docker(conn)?;
+
     if down {
         remote_runner::stop(deployment, conn, remote_dir)?;
         let mut registry = Registry::load()?;
