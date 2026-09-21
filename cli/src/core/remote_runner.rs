@@ -8,9 +8,10 @@ use super::{
     ssh::SshConnection,
 };
 
-/// Verify Docker is installed on the remote server.
+/// Verify Docker is installed and the current user can access the daemon.
 pub fn check_docker(conn: &SshConnection) -> Result<()> {
     logger::info("Checking Docker on remote...");
+
     let code = conn.exec_stream("docker --version 2>&1")?;
     if code != 0 {
         bail!(
@@ -19,6 +20,25 @@ pub fn check_docker(conn: &SshConnection) -> Result<()> {
              See: https://docs.docker.com/engine/install/"
         );
     }
+
+    // Verify the user can actually reach the daemon
+    let daemon_out = conn.exec_output("docker info 2>&1")?;
+    if daemon_out.contains("permission denied") || daemon_out.contains("Got permission denied") {
+        bail!(
+            "Permission denied connecting to the Docker daemon on the remote server.\n\
+             Add your user to the docker group and reconnect:\n\n  \
+             sudo usermod -aG docker $(whoami)\n\n\
+             Then open a new SSH session and rerun `yolped deploy`."
+        );
+    }
+    if daemon_out.contains("Cannot connect") || daemon_out.contains("Is the docker daemon running") {
+        bail!(
+            "Cannot connect to the Docker daemon on the remote server.\n\
+             Make sure Docker is running:\n\n  \
+             sudo systemctl start docker"
+        );
+    }
+
     Ok(())
 }
 
