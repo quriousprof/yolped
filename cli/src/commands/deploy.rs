@@ -1,6 +1,10 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    io::{self, Write},
+    path::{Path, PathBuf},
+};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::core::{
     logger,
@@ -88,6 +92,7 @@ fn run_remote(
         registry.update_status(config_path, DeploymentStatus::Stopped);
         registry.save()?;
     } else {
+        handle_remote_files(deployment, conn, remote_dir)?;
         ensure_built_remote(config_path, deployment, conn, remote_dir)?;
         let deploy_result = remote_runner::deploy(deployment, conn, remote_dir, args);
         let status = if deploy_result.is_ok() {
@@ -101,6 +106,89 @@ fn run_remote(
         registry.save()?;
         deploy_result?;
     }
+    Ok(())
+}
+
+/// Upload the deployment file and (for compose) handle env files.
+fn handle_remote_files(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
+    conn.mkdir_p(remote_dir)?;
+
+    let filename = deployment
+        .file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Dockerfile");
+
+    let remote_file = format!("{}/{}", remote_dir, filename);
+
+    // --- Upload compose/Dockerfile ---
+    if conn.file_exists(&remote_file) {
+        logger::warn(&format!("'{}' already exists on the server.", filename));
+        if confirm(&format!("Overwrite '{}'?", filename), false)? {
+            conn.upload(&deployment.file_path, &remote_file)?;
+            logger::success(&format!("'{}' overwritten.", filename));
+        } else {
+            logger::info(&format!("Keeping existing '{}'.", filename));
+        }
+    } else {
+        logger::info(&format!("Uploading '{}'...", filename));
+        conn.upload(&deployment.file_path, &remote_file)?;
+        logger::success(&format!("'{}' uploaded.", filename));
+    }
+
+    // --- Handle env files for docker-compose ---
+    if matches!(deployment.deployment_type, DeploymentType::DockerCompose) {
+        let local_dir = deployment
+            .file_path
+            .parent()
+            .unwrap_or(Path::new("."));
+
+        let env_files = remote_runner::parse_env_files(&deployment.file_path)?;
+
+        for local_env_path in env_files {
+            // Path relative to the compose file's directory (used for remote placement)
+            let rel = local_env_path
+                .strip_prefix(local_dir)
+                .unwrap_or(&local_env_path);
+
+            let remote_env = format!("{}/{}", remote_dir, rel.display());
+
+            if conn.file_exists(&remote_env) {
+                // Already on server — leave it alone
+                continue;
+            }
+
+            if local_env_path.exists() {
+                logger::warn(&format!(
+                    "Found '{}' locally but it is missing on the server.",
+                    rel.display()
+                ));
+                if confirm(&format!("Copy '{}' to server?", rel.display()), true)? {
+                    // Ensure the parent directory exists on remote
+                    if let Some(parent) = Path::new(&remote_env).parent() {
+                        conn.mkdir_p(parent.to_str().unwrap_or(remote_dir))?;
+                    }
+                    conn.upload(&local_env_path, &remote_env)?;
+                    logger::success(&format!("'{}' copied to server.", rel.display()));
+                } else {
+                    bail!(
+                        "Env file '{}' is missing on the server. Create it at '{}' before deploying.",
+                        rel.display(),
+                        remote_env
+                    );
+                }
+            } else {
+                bail!(
+                    "Env file '{}' is missing both locally and on the server.\n\
+                     Create it on the server at '{}' before deploying.",
+                    rel.display(),
+                    remote_env
+                );
+            }
+        }
+    }
+
+    println!();
     Ok(())
 }
 
@@ -134,7 +222,6 @@ fn ensure_built_remote(
     conn: &SshConnection,
     remote_dir: &str,
 ) -> Result<()> {
-    let remote_dir = &conn.expand_path(remote_dir)?;
     let is_built = match &deployment.deployment_type {
         DeploymentType::Dockerfile => remote_runner::image_exists(deployment, conn),
         DeploymentType::DockerCompose => Registry::load()?
@@ -156,4 +243,20 @@ fn ensure_built_remote(
     }
 
     Ok(())
+}
+
+fn confirm(question: &str, default_yes: bool) -> Result<bool> {
+    let hint = if default_yes { "Y/n" } else { "y/N" };
+    print!("{} [{}]: ", question, hint);
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim().to_lowercase();
+
+    Ok(match trimmed.as_str() {
+        "" => default_yes,
+        "y" | "yes" => true,
+        _ => false,
+    })
 }
