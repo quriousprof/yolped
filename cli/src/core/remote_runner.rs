@@ -8,6 +8,27 @@ use super::{
     ssh::SshConnection,
 };
 
+/// Detect the remote server's CPU architecture and return the Docker platform string.
+pub fn detect_platform(conn: &SshConnection) -> String {
+    let arch = conn.exec_output("uname -m").unwrap_or_default();
+    match arch.trim() {
+        "x86_64"          => "linux/amd64".to_string(),
+        "aarch64" | "arm64" => "linux/arm64".to_string(),
+        "armv7l"          => "linux/arm/v7".to_string(),
+        other             => format!("linux/{}", other),
+    }
+}
+
+/// Check whether docker-compose images exist for a project on the remote server.
+pub fn compose_images_exist(conn: &SshConnection, remote_file: &str, project_name: &str) -> bool {
+    conn.exec_output(&format!(
+        "docker compose -f '{}' -p '{}' images -q 2>/dev/null | head -1",
+        remote_file, project_name
+    ))
+    .map(|s| !s.trim().is_empty())
+    .unwrap_or(false)
+}
+
 /// Verify Docker is installed and the current user can access the daemon.
 pub fn check_docker(conn: &SshConnection) -> Result<()> {
     logger::info("Checking Docker on remote...");
@@ -97,8 +118,8 @@ pub fn parse_env_files(compose_path: &Path) -> Result<Vec<PathBuf>> {
 
 /// Build the deployment image on the remote server.
 /// Files must already be uploaded before calling this.
-pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
-    logger::info(&format!("Building '{}' on remote...", deployment.name));
+pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str, platform: &str) -> Result<()> {
+    logger::info(&format!("Building '{}' on remote ({})...", deployment.name, platform));
 
     let filename = deployment
         .file_path
@@ -111,16 +132,18 @@ pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) ->
     println!();
     let cmd = match &deployment.deployment_type {
         DeploymentType::Dockerfile => format!(
-            "docker build -f '{}' -t '{}' '{}'",
-            remote_file, deployment.name, remote_dir
+            "docker build --platform '{}' -f '{}' -t '{}' '{}'",
+            platform, remote_file, deployment.name, remote_dir
         ),
         DeploymentType::DockerCompose => format!(
-            "docker compose -f '{}' -p '{}' build",
+            "docker compose -f '{}' -p '{}' build --no-cache",
             remote_file, deployment.name
+            // compose reads DOCKER_DEFAULT_PLATFORM env set below
         ),
     };
 
-    let code = conn.exec_stream(&cmd)?;
+    let full_cmd = format!("DOCKER_DEFAULT_PLATFORM='{}' {}", platform, cmd);
+    let code = conn.exec_stream(&full_cmd)?;
     if code != 0 {
         bail!("Remote build failed (exit code: {})", code);
     }
@@ -136,6 +159,7 @@ pub fn deploy(
     conn: &SshConnection,
     remote_dir: &str,
     args: &[String],
+    platform: &str,
 ) -> Result<()> {
     logger::info(&format!("Deploying '{}' on remote...", deployment.name));
 
@@ -150,13 +174,15 @@ pub fn deploy(
 
     let cmd = match &deployment.deployment_type {
         DeploymentType::Dockerfile => format!(
-            "docker rm -f '{name}' 2>/dev/null; docker run -d --name '{name}' {extra} '{name}'",
+            "docker rm -f '{name}' 2>/dev/null; \
+             docker run --platform '{platform}' -d --name '{name}' {extra} '{name}'",
             name = deployment.name,
+            platform = platform,
             extra = extra,
         ),
         DeploymentType::DockerCompose => format!(
-            "docker compose -f '{}' -p '{}' up -d {}",
-            remote_file, deployment.name, extra
+            "DOCKER_DEFAULT_PLATFORM='{}' docker compose -f '{}' -p '{}' up -d {}",
+            platform, remote_file, deployment.name, extra
         ),
     };
 

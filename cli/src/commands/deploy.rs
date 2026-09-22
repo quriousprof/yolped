@@ -86,6 +86,9 @@ fn run_remote(
     let remote_dir = &conn.expand_path(remote_dir)?;
     remote_runner::check_docker(conn)?;
 
+    let platform = remote_runner::detect_platform(&conn);
+    logger::info(&format!("Remote platform: {}", platform));
+
     if down {
         remote_runner::stop(deployment, conn, remote_dir)?;
         let mut registry = Registry::load()?;
@@ -93,8 +96,8 @@ fn run_remote(
         registry.save()?;
     } else {
         handle_remote_files(deployment, conn, remote_dir)?;
-        ensure_built_remote(config_path, deployment, conn, remote_dir)?;
-        let deploy_result = remote_runner::deploy(deployment, conn, remote_dir, args);
+        ensure_built_remote(config_path, deployment, conn, remote_dir, &platform)?;
+        let deploy_result = remote_runner::deploy(deployment, conn, remote_dir, args, &platform);
         let status = if deploy_result.is_ok() {
             DeploymentStatus::Running
         } else {
@@ -221,21 +224,27 @@ fn ensure_built_remote(
     deployment: &Deployment,
     conn: &SshConnection,
     remote_dir: &str,
+    platform: &str,
 ) -> Result<()> {
+    let filename = deployment
+        .file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Dockerfile");
+    let remote_file = format!("{}/{}", remote_dir, filename);
+
+    // Always ask Docker directly — the registry cache can be stale if images were removed
     let is_built = match &deployment.deployment_type {
         DeploymentType::Dockerfile => remote_runner::image_exists(deployment, conn),
-        DeploymentType::DockerCompose => Registry::load()?
-            .deployments
-            .iter()
-            .find(|e| e.config_path == *config_path)
-            .map(|e| e.last_built_at.is_some())
-            .unwrap_or(false),
+        DeploymentType::DockerCompose => {
+            remote_runner::compose_images_exist(conn, &remote_file, &deployment.name)
+        }
     };
 
     if !is_built {
-        logger::info("No build found on remote. Building first...");
+        logger::info("No image found on remote. Building first...");
         println!();
-        remote_runner::build(deployment, conn, remote_dir)?;
+        remote_runner::build(deployment, conn, remote_dir, platform)?;
         let mut registry = Registry::load()?;
         registry.mark_built(config_path);
         registry.save()?;
