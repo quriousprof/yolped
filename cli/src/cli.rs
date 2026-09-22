@@ -28,6 +28,9 @@ pub enum Commands {
         /// Force deployment on the local machine, ignoring server config
         #[arg(long)]
         local: bool,
+        /// Remove existing images and force a clean rebuild before deploying
+        #[arg(long)]
+        rebuild: bool,
     },
     /// Stream logs for a deployment by name, or for the current directory's project
     Logs {

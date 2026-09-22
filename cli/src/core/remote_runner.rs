@@ -116,6 +116,34 @@ pub fn parse_env_files(compose_path: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// Remove all images for the deployment on the remote server.
+pub fn remove_images(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
+    logger::info("Removing existing images on remote...");
+
+    let filename = deployment
+        .file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("Invalid file name in file_path")?;
+
+    let remote_file = format!("{}/{}", remote_dir, filename);
+
+    let cmd = match &deployment.deployment_type {
+        DeploymentType::Dockerfile => format!(
+            "docker rmi -f '{}' 2>/dev/null || true",
+            deployment.name
+        ),
+        DeploymentType::DockerCompose => format!(
+            "docker compose -f '{}' -p '{}' down --rmi all 2>/dev/null || true",
+            remote_file, deployment.name
+        ),
+    };
+
+    conn.exec_stream(&cmd)?;
+    logger::success("Existing images removed.");
+    Ok(())
+}
+
 /// Build the deployment image on the remote server.
 /// Files must already be uploaded before calling this.
 pub fn build(deployment: &Deployment, conn: &SshConnection, remote_dir: &str, platform: &str) -> Result<()> {

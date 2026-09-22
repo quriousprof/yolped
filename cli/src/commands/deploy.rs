@@ -18,7 +18,7 @@ use crate::core::{
     ssh::SshConnection,
 };
 
-pub fn run(down: bool, force_local: bool) -> Result<()> {
+pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     let config_path = env::current_dir()?.join("yolped.json");
     let config = JdConfig::load()?;
     let deployment_args = config.deployment_args.clone();
@@ -41,7 +41,7 @@ pub fn run(down: bool, force_local: bool) -> Result<()> {
             logger::info(&format!("Deploying to {}@{}...", remote.user, remote.ip));
             println!();
             let conn = SshConnection::connect(remote)?;
-            run_remote(down, &config_path, &deployment, &deployment_args, &conn, &remote.remote_dir)?;
+            run_remote(down, rebuild, &config_path, &deployment, &deployment_args, &conn, &remote.remote_dir)?;
         }
     }
 
@@ -77,6 +77,7 @@ fn run_local(
 
 fn run_remote(
     down: bool,
+    rebuild: bool,
     config_path: &PathBuf,
     deployment: &Deployment,
     args: &[String],
@@ -95,6 +96,9 @@ fn run_remote(
         registry.update_status(config_path, DeploymentStatus::Stopped);
         registry.save()?;
     } else {
+        if rebuild {
+            remote_runner::remove_images(deployment, conn, remote_dir)?;
+        }
         handle_remote_files(deployment, conn, remote_dir)?;
         ensure_built_remote(config_path, deployment, conn, remote_dir, &platform)?;
         let deploy_result = remote_runner::deploy(deployment, conn, remote_dir, args, &platform);
