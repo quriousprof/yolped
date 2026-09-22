@@ -165,7 +165,22 @@ pub fn deploy(
     let code = conn.exec_stream(&cmd)?;
     println!();
     if code != 0 {
-        bail!("Remote deploy failed (exit code: {})", code);
+        // Show container logs so the user can see why it failed
+        logger::warn("Deploy failed. Fetching container logs...");
+        println!();
+        let logs_cmd = match &deployment.deployment_type {
+            DeploymentType::Dockerfile => format!(
+                "docker logs --tail=50 '{}'  2>&1",
+                deployment.name
+            ),
+            DeploymentType::DockerCompose => format!(
+                "docker compose -f '{}' -p '{}' logs --tail=50 2>&1",
+                remote_file, deployment.name
+            ),
+        };
+        let _ = conn.exec_stream(&logs_cmd);
+        println!();
+        bail!("Deploy failed — see logs above for details.");
     }
 
     logger::success(&format!("'{}' is running on remote.", deployment.name));
