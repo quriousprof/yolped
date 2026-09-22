@@ -8,35 +8,29 @@ use crate::core::{
         deployment::{Deployment, ServerType},
     },
     registry::Registry,
+    remote_runner,
     runner,
+    ssh::SshConnection,
 };
 
 pub fn run(name: Option<&str>) -> Result<()> {
-    let deployment = match name {
-        Some(name) => find_by_name(name)?,
-        None => from_current_dir()?,
-    };
-    runner::logs(&deployment)
+    match name {
+        Some(name) => logs_by_name(name),
+        None => logs_current_dir(),
+    }
 }
 
-fn from_current_dir() -> Result<Deployment> {
+fn logs_current_dir() -> Result<()> {
     let config = JdConfig::load()?;
-    Deployment::new(config.name, config.file_path, String::new(), ServerType::Local)
+    stream_logs(config)
 }
 
-fn find_by_name(name: &str) -> Result<Deployment> {
+fn logs_by_name(name: &str) -> Result<()> {
     let registry = Registry::load()?;
 
     for entry in &registry.deployments {
         match JdConfig::load_from(&entry.config_path) {
-            Ok(config) if config.name == name => {
-                return Deployment::new(
-                    config.name,
-                    config.file_path,
-                    String::new(),
-                    ServerType::Local,
-                );
-            }
+            Ok(config) if config.name == name => return stream_logs(config),
             _ => continue,
         }
     }
@@ -45,4 +39,23 @@ fn find_by_name(name: &str) -> Result<Deployment> {
         "No deployment named '{}' found. Run `yolped list` to see all deployments.",
         name
     )
+}
+
+fn stream_logs(config: JdConfig) -> Result<()> {
+    let server = config.server.clone();
+    let deployment = Deployment::new(
+        config.name,
+        config.file_path,
+        String::new(),
+        server.clone(),
+    )?;
+
+    match server {
+        ServerType::Local => runner::logs(&deployment),
+        ServerType::Remote(ref remote) => {
+            let conn = SshConnection::connect(remote)?;
+            let remote_dir = conn.expand_path(&remote.remote_dir)?;
+            remote_runner::logs(&deployment, &conn, &remote_dir)
+        }
+    }
 }

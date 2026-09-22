@@ -10,7 +10,7 @@ use crate::core::{
     logger,
     models::{
         config::JdConfig,
-        deployment::{parse_file, ServerType},
+        deployment::{parse_file, RemoteServer, ServerType, SshAuth},
     },
     registry::Registry,
     utils::generate_deployment_name,
@@ -42,13 +42,15 @@ pub fn run() -> Result<()> {
     let file_path = resolve_file_path(&project_dir)?;
     let deployment_type = parse_file(&file_path)?;
 
+    let server = prompt_server()?;
+
     let config = JdConfig {
         name,
         version,
         project_dir,
         deployment_type,
         file_path,
-        server: ServerType::Local,
+        server,
         deployment_args: vec![],
     };
 
@@ -72,6 +74,82 @@ pub fn run() -> Result<()> {
     println!();
     logger::success(&format!("Config saved to '{}'", config_path.display()));
     Ok(())
+}
+
+/// Only reconfigure the server section of an existing yolped.json
+pub fn run_server() -> Result<()> {
+    let config_path = env::current_dir()
+        .context("Failed to determine current directory")?
+        .join("yolped.json");
+
+    if !config_path.exists() {
+        bail!("No yolped.json found. Run `yolped setup` first.");
+    }
+
+    let mut config = JdConfig::load()?;
+    config.server = prompt_server()?;
+
+    let json = serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
+    fs::write(&config_path, &json).context("Failed to write yolped.json")?;
+
+    println!();
+    logger::success("Server configuration updated.");
+    Ok(())
+}
+
+fn prompt_server() -> Result<ServerType> {
+    println!();
+    let choice = prompt_choice("Server", &["Local (default)", "Remote"], 0)?;
+
+    if choice == 0 {
+        return Ok(ServerType::Local);
+    }
+
+    let ip = {
+        let input = prompt("IP address", None)?;
+        if input.is_empty() {
+            bail!("IP address cannot be empty");
+        }
+        input
+    };
+
+    let user = {
+        let input = prompt("SSH user", Some("root"))?;
+        if input.is_empty() { "root".to_string() } else { input }
+    };
+
+    let auth_choice = prompt_choice("Auth method", &["Password", "SSH key file"], 0)?;
+    let auth = if auth_choice == 0 {
+        logger::info("You will be prompted for your password at deploy time — it is never stored.");
+        SshAuth::Password
+    } else {
+        loop {
+            let input = prompt("Path to SSH private key", None)?;
+            if input.is_empty() {
+                logger::warn("Path cannot be empty.");
+                continue;
+            }
+            let raw = PathBuf::from(&input);
+            // Resolve relative paths to absolute
+            let path = if raw.is_absolute() {
+                raw
+            } else {
+                env::current_dir()?.join(&raw)
+            };
+            if !path.exists() {
+                logger::warn(&format!("'{}' not found, try again.", path.display()));
+                continue;
+            }
+            break SshAuth::Key(path);
+        }
+    };
+
+    let remote_dir = {
+        let input = prompt("Remote deployment directory", Some("~/deployments"))?;
+        if input.is_empty() { "~/deployments".to_string() } else { input }
+    };
+
+    Ok(ServerType::Remote(RemoteServer { ip, user, auth, remote_dir }))
 }
 
 fn resolve_file_path(project_dir: &Path) -> Result<PathBuf> {

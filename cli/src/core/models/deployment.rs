@@ -88,10 +88,26 @@ pub enum DeploymentType {
 }
 
 /// Target server for deployment
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerType {
     Local,
-    Remote(String),
+    Remote(RemoteServer),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RemoteServer {
+    pub ip: String,
+    pub user: String,
+    pub auth: SshAuth,
+    pub remote_dir: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum SshAuth {
+    /// Password is never stored — user is prompted at deploy time
+    Password,
+    /// Absolute path to SSH private key file
+    Key(PathBuf),
 }
 
 /// Lifecycle status of a deployment
