@@ -39,6 +39,8 @@ pub enum Commands {
     },
     /// List all registered deployments
     List,
+    /// Open an interactive SSH session to the configured remote server
+    Ssh,
 }
 
 #[derive(Subcommand, Debug)]

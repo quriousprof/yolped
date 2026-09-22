@@ -33,6 +33,7 @@ fn main() -> Result<()> {
         Commands::Deploy { down, local, rebuild, .. } => commands::deploy::run(down, local, rebuild)?,
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
         Commands::List => commands::list::run()?,
+        Commands::Ssh => commands::ssh::run()?,
         Commands::Build => {
             let config_path = std::env::current_dir()?.join("yolped.json");
             let config = JdConfig::load()?;
