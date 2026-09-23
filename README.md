@@ -2,15 +2,21 @@
 
 Deploy projects without leaving your terminal.
 
-`yolped` is a CLI tool that manages Docker and Docker Compose deployments — set up a project once, then build with a single command.
+`yolped` is a CLI tool that manages Docker and Docker Compose deployments — set up a project once, then build and deploy with a single command. Supports both local and remote (SSH) deployments.
 
 ## Install
 
+**With cargo (Rust users):**
 ```bash
-cargo install --path cli
+cargo install yolped
 ```
 
-This installs the `yolped` binary to `~/.cargo/bin/`.
+**With curl (macOS / Linux):**
+```bash
+curl -fsSL https://quriousprof.com/yolped/install | sh
+```
+
+Both install the `yolped` binary to a directory on your `$PATH`.
 
 ## Quick Start
 
@@ -21,6 +27,12 @@ yolped setup
 # Build
 yolped build
 
+# Deploy
+yolped deploy
+
+# Stream logs
+yolped logs
+
 # See all registered projects
 yolped list
 ```
@@ -30,8 +42,15 @@ yolped list
 | Command | Description |
 |---|---|
 | `yolped setup` | Interactively create a `yolped.json` config for the current project |
-| `yolped build` | Build the project using its `yolped.json` config |
-| `yolped list` | List all registered deployments |
+| `yolped setup server` | Reconfigure only the server settings |
+| `yolped build` | Build the Docker image using the project's `yolped.json` |
+| `yolped deploy` | Deploy to the configured server (local or remote) |
+| `yolped deploy --down` | Stop running containers |
+| `yolped deploy --rebuild` | Remove existing images and force a clean rebuild |
+| `yolped deploy --local` | Force a local deployment, ignoring server config |
+| `yolped logs [name]` | Stream logs for the current project or a named deployment |
+| `yolped list` | List all registered deployments grouped by status |
+| `yolped ssh` | Open an interactive SSH session to the configured remote server |
 
 ## Setup
 
@@ -41,9 +60,10 @@ Running `yolped setup` will:
 2. Prompt for the project directory (defaults to current directory)
 3. Auto-detect a `Dockerfile` or `docker-compose` file in the directory
 4. Ask which file to use, or let you enter a custom path
-5. Write a `yolped.json` to the project directory
+5. Ask for a server — Local (default) or Remote (IP, user, SSH key or password, remote directory)
+6. Write a `yolped.json` to the project directory
 
-Re-running `yolped setup` on an existing project backs up the current config to `yolped.json.old` before writing the new one.
+Re-running `yolped setup` backs up the existing config to `yolped.json.old` before writing the new one.
 
 ## Configuration
 
@@ -54,52 +74,44 @@ Re-running `yolped setup` on an existing project backs up the current config to 
   "name": "my-app",
   "version": "0.1.0",
   "project_dir": "/path/to/my-app",
-  "deployment_type": "Dockerfile",
-  "file_path": "/path/to/my-app/Dockerfile",
-  "server": "Local"
+  "deployment_type": "DockerCompose",
+  "file_path": "/path/to/my-app/docker-compose.yml",
+  "server": {
+    "Remote": {
+      "ip": "203.0.113.10",
+      "user": "ubuntu",
+      "auth": "Password",
+      "remote_dir": "~/deployments"
+    }
+  },
+  "deployment_args": []
 }
 ```
 
-Edit this file directly — `yolped build` and `yolped list` always read it fresh.
+`deployment_args` accepts arbitrary Docker flags applied at deploy time:
+
+```json
+"deployment_args": ["-p", "8000:8000", "--restart", "unless-stopped"]
+```
+
+Edit this file directly — all commands always read it fresh.
 
 ## Registry
 
-`yolped` tracks all registered projects in `~/.yolped/registry.json`. Only the path to each project's `yolped.json` is stored — no config data is duplicated.
+`yolped` tracks all registered projects in `~/.yolped/registry.json`. Only the path to each project's `yolped.json` is stored — no config is duplicated. `yolped list` does a live Docker status check on every entry.
 
-## Project Structure
+## Remote Deployments
 
-```
-yolped/
-├── cli/
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs
-│       ├── cli.rs
-│       ├── commands/
-│       │   ├── setup.rs       # yolped setup
-│       │   └── list.rs        # yolped list
-│       └── core/
-│           ├── logger.rs
-│           ├── registry.rs    # ~/.yolped/registry.json
-│           ├── runner.rs      # docker / docker compose execution
-│           ├── utils.rs
-│           └── models/
-│               ├── config.rs  # JdConfig (yolped.json)
-│               └── deployment.rs
-└── README.md
-```
+`yolped` can deploy to any Linux server over SSH:
 
-## Built With
-
-- [Rust](https://www.rust-lang.org/)
-- [clap](https://github.com/clap-rs/clap) — CLI argument parsing
-- [serde](https://serde.rs/) — config serialization
-- [ratatui](https://github.com/ratatui/ratatui) — terminal UI (in progress)
-- [colored](https://github.com/colored-rs/colored) — terminal output
-
-## Status
-
-Early stage — local Docker and Docker Compose deployments are supported. Remote server support is planned.
+1. Run `yolped setup` and choose **Remote** when prompted for server
+2. Enter the server IP, SSH user, and auth method (password or key file)
+3. Run `yolped deploy` — yolped will:
+   - Connect over SSH
+   - Upload your `docker-compose.yml` or `Dockerfile`
+   - Handle missing env files (asks to copy local ones)
+   - Auto-detect the server architecture and build for the right platform
+   - Stream all Docker output live to your terminal
 
 ## License
 
