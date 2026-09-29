@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use crate::core::{
     logger,
     models::{
-        config::JdConfig,
+        config::{JdConfig, RegistryConfig},
         deployment::{Deployment, DeploymentType},
     },
     registry::{DeploymentStatus, Registry},
@@ -24,6 +24,7 @@ pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     let run_args = config.run_args.clone();
     let server = config.server.clone();
     let platform = config.build.platform.clone();
+    let registry = config.registry.clone();
 
     let deployment = Deployment::new(config.name, config.build.file)?;
 
@@ -35,7 +36,7 @@ pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     logger::info(&format!("Deploying to {}@{}...", remote.user, remote.host));
     println!();
     let conn = SshConnection::connect(&remote)?;
-    run_remote(down, rebuild, &config_path, &deployment, &run_args, &conn, &remote.remote_dir)?;
+    run_remote(down, rebuild, &config_path, &deployment, &run_args, &conn, &remote.remote_dir, registry.as_ref())?;
 
     Ok(())
 }
@@ -76,6 +77,7 @@ fn run_remote(
     args: &[String],
     conn: &SshConnection,
     remote_dir: &str,
+    image_registry: Option<&RegistryConfig>,
 ) -> Result<()> {
     let remote_dir = &conn.expand_path(remote_dir)?;
     remote_runner::check_docker(conn)?;
@@ -92,9 +94,24 @@ fn run_remote(
         if rebuild {
             remote_runner::remove_images(deployment, conn, remote_dir)?;
         }
-        handle_remote_files(deployment, conn, remote_dir)?;
+
+        if let Some(reg) = image_registry {
+            // Registry-first: pull images from registry, upload compose file if needed
+            if matches!(deployment.deployment_type, DeploymentType::DockerCompose) {
+                conn.mkdir_p(remote_dir)?;
+                upload_deploy_file(deployment, conn, remote_dir)?;
+                sync_env_files(deployment, conn, remote_dir)?;
+                println!();
+            }
+            remote_runner::pull_from_registry(deployment, conn, remote_dir, reg)?;
+        } else {
+            // Build on remote
+            handle_remote_files(deployment, conn, remote_dir)?;
+            let mut reg = Registry::load()?;
+            ensure_built_remote(config_path, deployment, conn, remote_dir, &platform, &mut reg)?;
+        }
+
         let mut registry = Registry::load()?;
-        ensure_built_remote(config_path, deployment, conn, remote_dir, &platform, &mut registry)?;
         let deploy_result = remote_runner::deploy(deployment, conn, remote_dir, args, &platform);
         let status = if deploy_result.is_ok() {
             DeploymentStatus::Running
