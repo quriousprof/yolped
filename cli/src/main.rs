@@ -48,8 +48,8 @@ fn main() -> Result<()> {
             let platform = config.build.platform.clone();
 
             if config.build.files.is_empty() {
-                // Single-file project: build the primary deploy file
-                let deployment = Deployment::new(config.name, config.build.file)?;
+                // No explicit build files — build the deploy target
+                let deployment = Deployment::new(config.name, config.deploy.file)?;
                 runner::build(&deployment, platform.as_deref())?;
             } else {
                 // Multi-file: build each entry in build.files

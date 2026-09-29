@@ -37,7 +37,7 @@ pub fn run(extra_tags: &[String], version_override: Option<&str>) -> Result<()> 
         let config_path = env::current_dir()?.join("yolped.json");
         let config = JdConfig::load()?;
         let platform = config.build.platform.clone();
-        let deployment = Deployment::new(config.name, config.build.file)?;
+        let deployment = Deployment::new(config.name, config.deploy.file)?;
         runner::build(&deployment, platform.as_deref())?;
         let mut registry = Registry::load()?;
         registry.mark_built(&config_path);

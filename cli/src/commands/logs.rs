@@ -40,7 +40,7 @@ fn logs_by_name(name: &str) -> Result<()> {
 }
 
 fn stream_logs(config: JdConfig) -> Result<()> {
-    let deployment = Deployment::new(config.name, config.build.file)?;
+    let deployment = Deployment::new(config.name, config.deploy.file)?;
 
     match config.server {
         None => runner::logs(&deployment),

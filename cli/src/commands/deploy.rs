@@ -21,12 +21,12 @@ use crate::core::{
 pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     let config_path = env::current_dir()?.join("yolped.json");
     let config = JdConfig::load()?;
-    let run_args = config.run_args.clone();
+    let run_args = config.deploy.args.clone();
     let server = config.server.clone();
     let platform = config.build.platform.clone();
     let registry = config.registry.clone();
 
-    let deployment = Deployment::new(config.name, config.build.file)?;
+    let deployment = Deployment::new(config.name, config.deploy.file)?;
 
     if force_local || server.is_none() {
         return run_local(down, &config_path, &deployment, &run_args, platform.as_deref());

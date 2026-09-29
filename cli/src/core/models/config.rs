@@ -31,13 +31,8 @@ pub struct BuildFile {
 /// What to build and for which target platform.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildConfig {
-    /// Primary deployment file (Dockerfile or docker-compose.yml).
-    /// Used by deploy / stop / logs / ssh.
-    pub file: PathBuf,
     /// Dockerfiles to build and push to the registry.
-    /// When non-empty, `yolped build` and `yolped push` operate on these
-    /// instead of `file`. Each entry may override the image name and supply
-    /// per-file build args.
+    /// Each entry may carry its own image name and build args.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<BuildFile>,
     /// Target platform for cross-compilation (e.g. "linux/amd64", "linux/arm64").
@@ -47,16 +42,29 @@ pub struct BuildConfig {
     pub platform: Option<String>,
 }
 
+/// What to run on the server.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DeployConfig {
+    /// Dockerfile or docker-compose.yml that defines the running service.
+    /// Used by `yolped deploy`, `yolped logs`, and `yolped stop`.
+    pub file: PathBuf,
+    /// Extra args forwarded to `docker run` or `docker compose up`.
+    /// e.g. ["-p", "8000:8000", "--restart", "unless-stopped"]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
 /// Registry to push images to.
 /// Credentials are never stored here — use `docker login` to authenticate.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RegistryConfig {
-    /// Fully qualified image name without a tag, e.g. "ghcr.io/user/myapp".
-    /// Required for Dockerfile projects; not needed for docker-compose projects
+    /// Fallback image name used when a BuildFile has no `image` set
+    /// (e.g. "ghcr.io/user/myapp"). Not needed for docker-compose projects
     /// (each service carries its own `image:` field in the compose file).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
-    /// Tags to push. Defaults to ["latest"].
+    /// Tags to push. `@version` is replaced with `JdConfig::version` at push time.
+    /// Defaults to ["latest", "@version"].
     #[serde(default = "default_tags")]
     pub tags: Vec<String>,
 }
@@ -87,7 +95,10 @@ pub struct JdConfig {
     /// e.g. tags: ["latest", "@version"] with version "1.2.3" → pushes "latest" and "1.2.3".
     #[serde(default = "default_version")]
     pub version: String,
+    /// How to build images. Configure with `yolped setup` / `yolped setup registry`.
     pub build: BuildConfig,
+    /// What to run on the server. Configure with `yolped setup`.
+    pub deploy: DeployConfig,
     /// Registry for pushing images. Configure with `yolped setup registry`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<RegistryConfig>,
@@ -95,10 +106,6 @@ pub struct JdConfig {
     /// Configure with `yolped setup server`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<ServerConfig>,
-    /// Extra args passed to `docker run` or `docker compose up` at deploy time.
-    /// e.g. ["-p", "8000:8000", "--restart", "unless-stopped"]
-    #[serde(default)]
-    pub run_args: Vec<String>,
 }
 
 impl JdConfig {

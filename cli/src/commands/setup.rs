@@ -37,7 +37,7 @@ use anyhow::{Context, Result, bail};
 use crate::core::{
     logger,
     models::{
-        config::{BuildConfig, JdConfig, RegistryConfig, ServerConfig, SshAuth},
+        config::{BuildConfig, DeployConfig, JdConfig, RegistryConfig, ServerConfig, SshAuth},
         deployment::parse_file,
     },
     registry::Registry,
@@ -102,10 +102,10 @@ pub fn run() -> Result<()> {
     let config = JdConfig {
         name,
         version: "0.1.0".to_string(),
-        build: BuildConfig { file: file_path, files: vec![], platform },
+        build: BuildConfig { files: vec![], platform },
+        deploy: DeployConfig { file: file_path, args: vec![] },
         server,
         registry: None,
-        run_args: vec![],
     };
 
     let config_path = env::current_dir()
@@ -143,7 +143,7 @@ pub fn run_registry() -> Result<()> {
     }
 
     let mut config = JdConfig::load()?;
-    let is_compose = matches!(parse_file(&config.build.file), Ok(DeploymentType::DockerCompose));
+    let is_compose = matches!(parse_file(&config.deploy.file), Ok(DeploymentType::DockerCompose));
 
     println!();
     logger::info("Configure the registry to push images to.");

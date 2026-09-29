@@ -57,8 +57,8 @@ pub fn run(extra_tags: &[String], version_override: Option<&str>) -> Result<()> 
     let platform = config.build.platform.as_deref();
 
     if config.build.files.is_empty() {
-        // ── Backward-compat: single-file project ────────────────────────────
-        let deploy_type = parse_file(&config.build.file)?;
+        // ── Backward-compat: no build.files set, fall back to deploy.file ───
+        let deploy_type = parse_file(&config.deploy.file)?;
         match deploy_type {
             DeploymentType::Dockerfile => {
                 let image = registry.image.as_deref().ok_or_else(|| {
@@ -68,7 +68,7 @@ pub fn run(extra_tags: &[String], version_override: Option<&str>) -> Result<()> 
                     )
                 })?;
                 push_single(
-                    &config.build.file,
+                    &config.deploy.file,
                     image,
                     &config.name,
                     &tags,
@@ -77,7 +77,7 @@ pub fn run(extra_tags: &[String], version_override: Option<&str>) -> Result<()> 
                 )?;
             }
             DeploymentType::DockerCompose => {
-                push_compose(&config.build.file, &config.name, &registry)?;
+                push_compose(&config.deploy.file, &config.name, &registry)?;
             }
         }
     } else {
