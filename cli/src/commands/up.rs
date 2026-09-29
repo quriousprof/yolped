@@ -10,7 +10,8 @@ use super::{deploy, push};
 /// Build → push → deploy in a single command.
 ///
 /// Requires both a registry and a server to be configured.
-pub fn run(extra_tags: &[String]) -> Result<()> {
+/// `version_override` replaces `@version` in tags for this run (see `push::run`).
+pub fn run(extra_tags: &[String], version_override: Option<&str>) -> Result<()> {
     let config = JdConfig::load()?;
 
     if config.registry.is_none() {
@@ -46,7 +47,7 @@ pub fn run(extra_tags: &[String]) -> Result<()> {
     println!();
     logger::info("Step 2/3: Pushing to registry...");
     println!();
-    push::run(extra_tags)?;
+    push::run(extra_tags, version_override)?;
 
     println!();
     logger::info("Step 3/3: Deploying...");

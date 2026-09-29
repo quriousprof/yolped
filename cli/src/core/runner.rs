@@ -1,5 +1,7 @@
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader},
+    path::Path,
     process::{Command, Stdio},
     thread,
 };
@@ -149,6 +151,71 @@ fn build_dockerfile(deployment: &Deployment, platform: Option<&str>) -> Result<(
     }
 
     logger::success(&format!("'{}' built successfully!", deployment.name));
+    Ok(())
+}
+
+/// Build a single Dockerfile with an explicit local image name and optional build args.
+/// Used by `Commands::Build` when `build.files` is non-empty.
+pub fn build_file(
+    file_path: &Path,
+    local_name: &str,
+    platform: Option<&str>,
+    build_args: &HashMap<String, String>,
+) -> Result<()> {
+    logger::info(&format!("Building {}...", file_path.display()));
+
+    let context_path = file_path
+        .parent()
+        .context("Could not determine build context: Dockerfile has no parent directory")?;
+
+    let file_str = file_path
+        .to_str()
+        .context("Dockerfile path contains invalid UTF-8")?;
+
+    let context_str = context_path
+        .to_str()
+        .context("Build context path contains invalid UTF-8")?;
+
+    let mut cmd = Command::new("docker");
+
+    if platform.is_some() {
+        cmd.args(["buildx", "build", "--load"]);
+    } else {
+        cmd.args(["build"]);
+    }
+
+    cmd.args(["-f", file_str]);
+
+    if let Some(p) = platform {
+        cmd.args(["--platform", p]);
+    }
+
+    if !local_name.is_empty() {
+        cmd.args(["-t", local_name]);
+    }
+
+    for (k, v) in build_args {
+        cmd.args(["--build-arg", &format!("{}={}", k, v)]);
+    }
+
+    cmd.arg(context_str)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    let status = cmd
+        .spawn()
+        .context("Failed to spawn 'docker build'. Is Docker installed and running?")?
+        .wait()
+        .context("Failed to wait for 'docker build' process")?;
+
+    if !status.success() {
+        bail!(
+            "Docker build failed (exit code: {})",
+            status.code().map_or_else(|| "unknown".to_string(), |c| c.to_string())
+        );
+    }
+
+    logger::success(&format!("'{}' built successfully!", local_name));
     Ok(())
 }
 

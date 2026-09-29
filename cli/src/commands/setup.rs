@@ -101,7 +101,8 @@ pub fn run() -> Result<()> {
 
     let config = JdConfig {
         name,
-        build: BuildConfig { file: file_path, platform },
+        version: "0.1.0".to_string(),
+        build: BuildConfig { file: file_path, files: vec![], platform },
         server,
         registry: None,
         run_args: vec![],

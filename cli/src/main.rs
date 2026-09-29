@@ -32,17 +32,11 @@ fn main() -> Result<()> {
             Some(SetupSubcommand::Server) => commands::setup::run_server()?,
             Some(SetupSubcommand::Registry) => commands::setup::run_registry()?,
         },
-        Commands::Push { mut tags, version } => {
-            if let Some(v) = version {
-                if !tags.contains(&v) { tags.push(v); }
-            }
-            push::run(&tags)?
+        Commands::Push { tags, version } => {
+            push::run(&tags, version.as_deref())?;
         }
-        Commands::Up { mut tags, version } => {
-            if let Some(v) = version {
-                if !tags.contains(&v) { tags.push(v); }
-            }
-            up::run(&tags)?
+        Commands::Up { tags, version } => {
+            up::run(&tags, version.as_deref())?;
         }
         Commands::Deploy { down, local, rebuild, .. } => commands::deploy::run(down, local, rebuild)?,
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
@@ -52,8 +46,23 @@ fn main() -> Result<()> {
             let config_path = std::env::current_dir()?.join("yolped.json");
             let config = JdConfig::load()?;
             let platform = config.build.platform.clone();
-            let deployment = Deployment::new(config.name, config.build.file)?;
-            runner::build(&deployment, platform.as_deref())?;
+
+            if config.build.files.is_empty() {
+                // Single-file project: build the primary deploy file
+                let deployment = Deployment::new(config.name, config.build.file)?;
+                runner::build(&deployment, platform.as_deref())?;
+            } else {
+                // Multi-file: build each entry in build.files
+                for bf in &config.build.files {
+                    runner::build_file(
+                        &bf.file,
+                        bf.image.as_deref().unwrap_or(&config.name),
+                        platform.as_deref(),
+                        &bf.build_args,
+                    )?;
+                }
+            }
+
             let mut registry = Registry::load()?;
             registry.mark_built(&config_path);
             registry.save()?;

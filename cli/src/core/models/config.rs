@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -14,11 +14,32 @@ pub enum SshAuth {
     Key(PathBuf),
 }
 
+/// A single Dockerfile entry in the build pipeline.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildFile {
+    /// Path to the Dockerfile.
+    pub file: PathBuf,
+    /// Fully qualified image name for this file (e.g. "ghcr.io/user/myapp-api").
+    /// Falls back to `registry.image` when omitted (single-file projects).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Docker build arguments passed as `--build-arg KEY=VALUE`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub build_args: HashMap<String, String>,
+}
+
 /// What to build and for which target platform.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildConfig {
-    /// Path to the Dockerfile or docker-compose file.
+    /// Primary deployment file (Dockerfile or docker-compose.yml).
+    /// Used by deploy / stop / logs / ssh.
     pub file: PathBuf,
+    /// Dockerfiles to build and push to the registry.
+    /// When non-empty, `yolped build` and `yolped push` operate on these
+    /// instead of `file`. Each entry may override the image name and supply
+    /// per-file build args.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<BuildFile>,
     /// Target platform for cross-compilation (e.g. "linux/amd64", "linux/arm64").
     /// Detected from the remote server during `yolped setup` and stored so
     /// `yolped build` can cross-compile without the server being reachable.
@@ -41,7 +62,11 @@ pub struct RegistryConfig {
 }
 
 fn default_tags() -> Vec<String> {
-    vec!["latest".to_string()]
+    vec!["latest".to_string(), "@version".to_string()]
+}
+
+fn default_version() -> String {
+    "0.1.0".to_string()
 }
 
 /// Remote server to deploy to.
@@ -58,6 +83,10 @@ pub struct ServerConfig {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JdConfig {
     pub name: String,
+    /// Project version. Used as the `@version` placeholder in registry tags.
+    /// e.g. tags: ["latest", "@version"] with version "1.2.3" → pushes "latest" and "1.2.3".
+    #[serde(default = "default_version")]
+    pub version: String,
     pub build: BuildConfig,
     /// Registry for pushing images. Configure with `yolped setup registry`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
