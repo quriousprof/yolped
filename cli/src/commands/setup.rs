@@ -4,6 +4,34 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rustyline::{CompletionType, Config, Editor, Helper, Result as RlResult};
+use rustyline::completion::{Completer, FilenameCompleter, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::Context as RlContext;
+
+/// Minimal rustyline helper that only provides filename tab-completion.
+struct FileCompleterHelper {
+    completer: FilenameCompleter,
+}
+
+impl Helper for FileCompleterHelper {}
+
+impl Completer for FileCompleterHelper {
+    type Candidate = Pair;
+    fn complete(&self, line: &str, pos: usize, ctx: &RlContext<'_>) -> RlResult<(usize, Vec<Pair>)> {
+        self.completer.complete(line, pos, ctx)
+    }
+}
+
+impl Hinter for FileCompleterHelper {
+    type Hint = String;
+}
+
+impl Highlighter for FileCompleterHelper {}
+impl Validator for FileCompleterHelper {}
+
 use anyhow::{Context, Result, bail};
 
 use crate::core::{
@@ -251,25 +279,7 @@ fn prompt_server() -> Result<Option<ServerConfig>> {
         logger::info("You will be prompted for your password at deploy time — it is never stored.");
         SshAuth::Password
     } else {
-        loop {
-            let input = prompt("Path to SSH private key", None)?;
-            if input.is_empty() {
-                logger::warn("Path cannot be empty.");
-                continue;
-            }
-            let raw = PathBuf::from(&input);
-            // Resolve relative paths to absolute
-            let path = if raw.is_absolute() {
-                raw
-            } else {
-                env::current_dir()?.join(&raw)
-            };
-            if !path.exists() {
-                logger::warn(&format!("'{}' not found, try again.", path.display()));
-                continue;
-            }
-            break SshAuth::Key(path);
-        }
+        prompt_key_path()?
     };
 
     let remote_dir = {
@@ -356,6 +366,47 @@ fn ask_custom_path() -> Result<PathBuf> {
             return Ok(path);
         }
         logger::warn(&format!("'{}' not found, try again.", path.display()));
+    }
+}
+
+/// Prompt for an SSH private key path with tab-completion for file names.
+fn prompt_key_path() -> Result<SshAuth> {
+    let rl_config = Config::builder()
+        .completion_type(CompletionType::List)
+        .build();
+
+    let mut rl = Editor::with_config(rl_config)
+        .context("Failed to initialize file completer")?;
+    rl.set_helper(Some(FileCompleterHelper { completer: FilenameCompleter::new() }));
+
+    logger::info("Tab to autocomplete. Press Enter to confirm.");
+
+    loop {
+        match rl.readline("Path to SSH private key: ") {
+            Ok(input) => {
+                let input = input.trim().to_string();
+                if input.is_empty() {
+                    logger::warn("Path cannot be empty.");
+                    continue;
+                }
+                let raw = PathBuf::from(&input);
+                let path = if raw.is_absolute() {
+                    raw
+                } else {
+                    env::current_dir()?.join(&raw)
+                };
+                if !path.exists() {
+                    logger::warn(&format!("'{}' not found, try again.", path.display()));
+                    continue;
+                }
+                return Ok(SshAuth::Key(path));
+            }
+            Err(rustyline::error::ReadlineError::Interrupted)
+            | Err(rustyline::error::ReadlineError::Eof) => {
+                bail!("Aborted.");
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
 }
 
