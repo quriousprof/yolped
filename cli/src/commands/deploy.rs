@@ -23,11 +23,12 @@ pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     let config = JdConfig::load()?;
     let run_args = config.run_args.clone();
     let server = config.server.clone();
+    let platform = config.build.platform.clone();
 
     let deployment = Deployment::new(config.name, config.build.file)?;
 
     if force_local || server.is_none() {
-        return run_local(down, &config_path, &deployment, &run_args);
+        return run_local(down, &config_path, &deployment, &run_args, platform.as_deref());
     }
 
     let remote = server.unwrap();
@@ -44,6 +45,7 @@ fn run_local(
     config_path: &PathBuf,
     deployment: &Deployment,
     args: &[String],
+    platform: Option<&str>,
 ) -> Result<()> {
     if down {
         runner::stop(deployment)?;
@@ -51,7 +53,7 @@ fn run_local(
         registry.update_status(config_path, DeploymentStatus::Stopped);
         registry.save()?;
     } else {
-        ensure_built_local(config_path, deployment)?;
+        ensure_built_local(config_path, deployment, platform)?;
         let deploy_result = runner::deploy(deployment, args);
         let status = match &deploy_result {
             Ok(_) => runner::check_status(deployment),
@@ -202,7 +204,7 @@ fn sync_env_files(deployment: &Deployment, conn: &SshConnection, remote_dir: &st
     Ok(())
 }
 
-fn ensure_built_local(config_path: &PathBuf, deployment: &Deployment) -> Result<()> {
+fn ensure_built_local(config_path: &PathBuf, deployment: &Deployment, platform: Option<&str>) -> Result<()> {
     let is_built = match &deployment.deployment_type {
         DeploymentType::Dockerfile => runner::image_exists(&deployment.name),
         DeploymentType::DockerCompose => Registry::load()?
@@ -216,7 +218,7 @@ fn ensure_built_local(config_path: &PathBuf, deployment: &Deployment) -> Result<
     if !is_built {
         logger::info("No build found. Running `yolped build` first...");
         println!();
-        runner::build(deployment)?;
+        runner::build(deployment, platform)?;
         let mut registry = Registry::load()?;
         registry.mark_built(config_path);
         registry.save()?;

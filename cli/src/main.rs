@@ -40,8 +40,9 @@ fn main() -> Result<()> {
         Commands::Build => {
             let config_path = std::env::current_dir()?.join("yolped.json");
             let config = JdConfig::load()?;
+            let platform = config.build.platform.clone();
             let deployment = Deployment::new(config.name, config.build.file)?;
-            runner::build(&deployment)?;
+            runner::build(&deployment, platform.as_deref())?;
             let mut registry = Registry::load()?;
             registry.mark_built(&config_path);
             registry.save()?;

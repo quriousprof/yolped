@@ -84,17 +84,19 @@ pub fn image_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Execute the build step for a deployment
-pub fn build(deployment: &Deployment) -> Result<()> {
+/// Execute the build step for a deployment.
+/// If `platform` is provided (e.g. "linux/amd64"), uses `docker buildx build` for
+/// cross-compilation; otherwise falls back to the plain `docker build`.
+pub fn build(deployment: &Deployment, platform: Option<&str>) -> Result<()> {
     logger::info(&format!("Building '{}'...", deployment.name));
 
     match &deployment.deployment_type {
-        DeploymentType::Dockerfile => build_dockerfile(deployment),
-        DeploymentType::DockerCompose => build_compose(deployment),
+        DeploymentType::Dockerfile => build_dockerfile(deployment, platform),
+        DeploymentType::DockerCompose => build_compose(deployment, platform),
     }
 }
 
-fn build_dockerfile(deployment: &Deployment) -> Result<()> {
+fn build_dockerfile(deployment: &Deployment, platform: Option<&str>) -> Result<()> {
     let file_path = &deployment.file_path;
 
     let context_path = file_path
@@ -110,7 +112,20 @@ fn build_dockerfile(deployment: &Deployment) -> Result<()> {
         .context("Build context path contains invalid UTF-8")?;
 
     let mut cmd = Command::new("docker");
-    cmd.args(["build", "-f", file_str]);
+
+    if platform.is_some() {
+        // Use buildx for cross-compilation with --load so the image lands in
+        // the local Docker daemon (not just the buildx cache).
+        cmd.args(["buildx", "build", "--load"]);
+    } else {
+        cmd.args(["build"]);
+    }
+
+    cmd.args(["-f", file_str]);
+
+    if let Some(p) = platform {
+        cmd.args(["--platform", p]);
+    }
 
     if !deployment.name.is_empty() {
         cmd.args(["-t", &deployment.name]);
@@ -196,7 +211,7 @@ fn deploy_compose(deployment: &Deployment, args: &[String]) -> Result<()> {
 
     // Read stderr in a thread so the pipe buffer never blocks the child.
     // Capture the output to check for known errors while still printing it live.
-    let stderr = child.stderr.take().unwrap();
+    let stderr = child.stderr.take().expect("stderr was not piped — this is a bug");
     let stderr_thread = thread::spawn(move || {
         let reader = BufReader::new(stderr);
         let mut platform_mismatch = false;
@@ -329,14 +344,20 @@ fn logs_compose(deployment: &Deployment) -> Result<()> {
     Ok(())
 }
 
-fn build_compose(deployment: &Deployment) -> Result<()> {
+fn build_compose(deployment: &Deployment, platform: Option<&str>) -> Result<()> {
     let file_str = deployment
         .file_path
         .to_str()
         .context("Compose file path contains invalid UTF-8")?;
 
-    let status = Command::new("docker")
-        .args(["compose", "-f", file_str, "-p", &deployment.name, "build"])
+    let mut cmd = Command::new("docker");
+    cmd.args(["compose", "-f", file_str, "-p", &deployment.name, "build"]);
+
+    if let Some(p) = platform {
+        cmd.env("DOCKER_DEFAULT_PLATFORM", p);
+    }
+
+    let status = cmd
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
