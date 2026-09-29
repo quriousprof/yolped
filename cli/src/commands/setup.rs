@@ -13,6 +13,8 @@ use crate::core::{
         deployment::parse_file,
     },
     registry::Registry,
+    remote_runner,
+    ssh::SshConnection,
     utils::generate_deployment_name,
 };
 
@@ -49,9 +51,29 @@ pub fn run() -> Result<()> {
 
     let server = prompt_server()?;
 
+    // Detect the remote platform so `yolped build` can cross-compile without
+    // needing the server to be reachable at build time.
+    let platform = if let Some(ref s) = server {
+        println!();
+        logger::info("Detecting remote platform...");
+        match SshConnection::connect(s) {
+            Ok(conn) => {
+                let p = remote_runner::detect_platform(&conn);
+                logger::success(&format!("Remote platform: {}", p));
+                Some(p)
+            }
+            Err(e) => {
+                logger::warn(&format!("Could not detect platform ({}). You can set it later.", e));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let config = JdConfig {
         name,
-        build: BuildConfig { file: file_path, platform: None },
+        build: BuildConfig { file: file_path, platform },
         server,
         registry: None,
         run_args: vec![],
@@ -167,6 +189,24 @@ pub fn run_server() -> Result<()> {
 
     let mut config = JdConfig::load()?;
     config.server = prompt_server()?;
+
+    // Re-detect platform for the new server
+    if let Some(ref s) = config.server {
+        println!();
+        logger::info("Detecting remote platform...");
+        match SshConnection::connect(s) {
+            Ok(conn) => {
+                let p = remote_runner::detect_platform(&conn);
+                logger::success(&format!("Remote platform: {}", p));
+                config.build.platform = Some(p);
+            }
+            Err(e) => {
+                logger::warn(&format!("Could not detect platform ({}). Platform unchanged.", e));
+            }
+        }
+    } else {
+        config.build.platform = None;
+    }
 
     let json = serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
     fs::write(&config_path, &json).context("Failed to write yolped.json")?;
