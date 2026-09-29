@@ -34,15 +34,21 @@ pub enum Commands {
     },
     /// Build and push the image to the configured registry
     Push {
-        /// Additional tags to push alongside those configured in yolped.json
+        /// Additional tags to push (e.g. --tag v1.2.3)
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
+        /// Shorthand for --tag: push with this version string as an extra tag
+        #[arg(long, value_name = "VERSION")]
+        version: Option<String>,
     },
     /// Build, push, and deploy in one step (requires registry to be configured)
     Up {
-        /// Additional tags to push alongside those configured in yolped.json
+        /// Additional tags to push (e.g. --tag v1.2.3)
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
+        /// Shorthand for --tag: push with this version string as an extra tag
+        #[arg(long, value_name = "VERSION")]
+        version: Option<String>,
     },
     /// Stream logs for a deployment by name, or for the current directory's project
     Logs {
