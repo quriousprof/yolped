@@ -5,23 +5,19 @@ use anyhow::{bail, Result};
 use crate::core::{
     logger,
     models::{
-        config::JdConfig,
-        deployment::{ServerType, SshAuth},
+        config::{JdConfig, SshAuth},
     },
 };
 
 pub fn run() -> Result<()> {
     let config = JdConfig::load()?;
 
-    let remote = match config.server {
-        ServerType::Remote(r) => r,
-        ServerType::Local => bail!(
-            "No remote server configured for this project. \
-             Run `yolped setup server` to add one."
-        ),
-    };
+    let remote = config.server.ok_or_else(|| anyhow::anyhow!(
+        "No remote server configured for this project. \
+         Run `yolped setup server` to add one."
+    ))?;
 
-    logger::info(&format!("Connecting to {}@{}...", remote.user, remote.ip));
+    logger::info(&format!("Connecting to {}@{}...", remote.user, remote.host));
 
     let mut cmd = Command::new("ssh");
 
@@ -29,7 +25,7 @@ pub fn run() -> Result<()> {
         cmd.args(["-i", key_path.to_str().unwrap_or("")]);
     }
 
-    cmd.arg(format!("{}@{}", remote.user, remote.ip));
+    cmd.arg(format!("{}@{}", remote.user, remote.host));
 
     let status = cmd.status()?;
 

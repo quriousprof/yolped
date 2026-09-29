@@ -9,8 +9,8 @@ use anyhow::{Context, Result, bail};
 use crate::core::{
     logger,
     models::{
-        config::JdConfig,
-        deployment::{parse_file, RemoteServer, ServerType, SshAuth},
+        config::{BuildConfig, JdConfig, RegistryConfig, ServerConfig, SshAuth},
+        deployment::parse_file,
     },
     registry::Registry,
     utils::generate_deployment_name,
@@ -22,11 +22,15 @@ pub fn run() -> Result<()> {
 
     let name = {
         let default = generate_deployment_name();
-        let input = prompt("Deployment name", Some(&default))?;
-        if input.is_empty() { default } else { input }
+        loop {
+            let input = prompt("Deployment name", Some(&default))?;
+            let candidate = if input.is_empty() { default.clone() } else { input };
+            if is_valid_name(&candidate) {
+                break candidate;
+            }
+            logger::warn("Name may only contain letters, numbers, hyphens, underscores, and dots.");
+        }
     };
-
-    let version = "0.1.0".to_string();
 
     let project_dir = {
         let cwd = env::current_dir().context("Failed to determine current directory")?;
@@ -40,18 +44,17 @@ pub fn run() -> Result<()> {
     };
 
     let file_path = resolve_file_path(&project_dir)?;
-    let deployment_type = parse_file(&file_path)?;
+    // Validate the file can be parsed
+    parse_file(&file_path)?;
 
     let server = prompt_server()?;
 
     let config = JdConfig {
         name,
-        version,
-        project_dir,
-        deployment_type,
-        file_path,
+        build: BuildConfig { file: file_path, platform: None },
         server,
-        deployment_args: vec![],
+        registry: None,
+        run_args: vec![],
     };
 
     let config_path = env::current_dir()
@@ -76,6 +79,82 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+/// Configure or update the registry section of an existing yolped.json
+pub fn run_registry() -> Result<()> {
+    use crate::core::models::deployment::{parse_file, DeploymentType};
+
+    let config_path = env::current_dir()
+        .context("Failed to determine current directory")?
+        .join("yolped.json");
+
+    if !config_path.exists() {
+        bail!("No yolped.json found. Run `yolped setup` first.");
+    }
+
+    let mut config = JdConfig::load()?;
+    let is_compose = matches!(parse_file(&config.build.file), Ok(DeploymentType::DockerCompose));
+
+    println!();
+    logger::info("Configure the registry to push images to.");
+    logger::info("Credentials are not stored — run `docker login <registry>` separately.");
+    println!();
+
+    // For compose projects the image name lives in each service's `image:` field,
+    // so we don't need (or use) a top-level image name.
+    let image = if is_compose {
+        logger::info(
+            "docker-compose project: image names are taken from each service's 'image:' field.\n\
+             Make sure each service you want to push has 'build:' and 'image:' set."
+        );
+        println!();
+        None
+    } else {
+        let current = config
+            .registry
+            .as_ref()
+            .and_then(|r| r.image.as_deref())
+            .unwrap_or("");
+        let input = if current.is_empty() {
+            prompt("Image name (e.g. ghcr.io/user/myapp)", None)?
+        } else {
+            prompt("Image name", Some(current))?
+        };
+        let candidate = if input.is_empty() { current.to_string() } else { input };
+        if candidate.is_empty() {
+            bail!("Image name cannot be empty for Dockerfile projects.");
+        }
+        Some(candidate)
+    };
+
+    let tags = {
+        let current = config
+            .registry
+            .as_ref()
+            .map(|r| r.tags.join(", "))
+            .unwrap_or_else(|| "latest".to_string());
+        let input = prompt("Tags (comma-separated)", Some(&current))?;
+        let raw = if input.is_empty() { current } else { input };
+        raw.split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+    };
+
+    if tags.is_empty() {
+        bail!("At least one tag is required.");
+    }
+
+    config.registry = Some(RegistryConfig { image, tags });
+
+    let json = serde_json::to_string_pretty(&config).context("Failed to serialize config")?;
+    fs::write(&config_path, &json).context("Failed to write yolped.json")?;
+
+    println!();
+    logger::success("Registry configuration saved.");
+    logger::info("Run `yolped push` to build and push your image.");
+    Ok(())
+}
+
 /// Only reconfigure the server section of an existing yolped.json
 pub fn run_server() -> Result<()> {
     let config_path = env::current_dir()
@@ -97,18 +176,27 @@ pub fn run_server() -> Result<()> {
     Ok(())
 }
 
-fn prompt_server() -> Result<ServerType> {
+/// Returns true if the name is safe to use as a Docker container/image name
+/// and in shell commands: letters, numbers, hyphens, underscores, and dots only.
+fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+fn prompt_server() -> Result<Option<ServerConfig>> {
     println!();
     let choice = prompt_choice("Server", &["Local (default)", "Remote"], 0)?;
 
     if choice == 0 {
-        return Ok(ServerType::Local);
+        return Ok(None);
     }
 
-    let ip = {
-        let input = prompt("IP address", None)?;
+    let host = {
+        let input = prompt("IP address or hostname", None)?;
         if input.is_empty() {
-            bail!("IP address cannot be empty");
+            bail!("Host cannot be empty");
         }
         input
     };
@@ -149,10 +237,11 @@ fn prompt_server() -> Result<ServerType> {
         if input.is_empty() { "~/deployments".to_string() } else { input }
     };
 
-    Ok(ServerType::Remote(RemoteServer { ip, user, auth, remote_dir }))
+    Ok(Some(ServerConfig { host, user, auth, remote_dir }))
 }
 
-fn resolve_file_path(project_dir: &Path) -> Result<PathBuf> {
+/// Detect Dockerfile and docker-compose files in a project directory.
+fn detect_docker_files(project_dir: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
     let dockerfile = ["Dockerfile", "dockerfile"]
         .iter()
         .map(|f| project_dir.join(f))
@@ -167,6 +256,12 @@ fn resolve_file_path(project_dir: &Path) -> Result<PathBuf> {
     .iter()
     .map(|f| project_dir.join(f))
     .find(|p| p.exists());
+
+    (dockerfile, compose)
+}
+
+fn resolve_file_path(project_dir: &Path) -> Result<PathBuf> {
+    let (dockerfile, compose) = detect_docker_files(project_dir);
 
     match (dockerfile, compose) {
         (Some(df), Some(dc)) => {

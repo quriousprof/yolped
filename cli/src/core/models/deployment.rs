@@ -1,43 +1,25 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-/// Represents a single deployment configuration
-#[derive(Serialize, Deserialize, Debug)]
+/// Represents the core information needed to build/deploy a project.
+#[derive(Debug)]
 pub struct Deployment {
-    pub(crate) name: String,
-    pub(crate) file_path: PathBuf,
-    pub(crate) config_location: String,
-    pub(crate) deployment_type: DeploymentType,
-    pub(crate) server: ServerType,
-    pub(crate) deployed_at: DateTime<Utc>,
-    pub(crate) status: DeploymentStatus,
+    pub name: String,
+    pub file_path: PathBuf,
+    pub deployment_type: DeploymentType,
 }
 
 impl Deployment {
-    pub fn new(
-        name: String,
-        file_path: PathBuf,
-        config_location: String,
-        server: ServerType,
-    ) -> Result<Self> {
+    pub fn new(name: String, file_path: PathBuf) -> Result<Self> {
         let deployment_type = parse_file(&file_path)?;
-        Ok(Self {
-            name,
-            file_path,
-            config_location,
-            deployment_type,
-            server,
-            deployed_at: Utc::now(),
-            status: DeploymentStatus::Idle,
-        })
+        Ok(Self { name, file_path, deployment_type })
     }
 }
 
-/// Determine the [`DeploymentType`] from a file path
-pub fn parse_file(file_path: &PathBuf) -> Result<DeploymentType> {
+/// Determine the [`DeploymentType`] from a file path.
+pub fn parse_file(file_path: &Path) -> Result<DeploymentType> {
     if !file_path.exists() {
         bail!("File '{}' does not exist", file_path.display());
     }
@@ -68,7 +50,7 @@ pub fn parse_file(file_path: &PathBuf) -> Result<DeploymentType> {
                 .and_then(|n| n.to_str())
                 .context("Filename contains invalid UTF-8")?;
 
-            if filename == "Dockerfile" {
+            if filename == "Dockerfile" || filename == "dockerfile" {
                 Ok(DeploymentType::Dockerfile)
             } else {
                 bail!(
@@ -81,40 +63,8 @@ pub fn parse_file(file_path: &PathBuf) -> Result<DeploymentType> {
 }
 
 /// Type of deployment
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum DeploymentType {
     Dockerfile,
     DockerCompose,
-}
-
-/// Target server for deployment
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum ServerType {
-    Local,
-    Remote(RemoteServer),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RemoteServer {
-    pub ip: String,
-    pub user: String,
-    pub auth: SshAuth,
-    pub remote_dir: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum SshAuth {
-    /// Password is never stored — user is prompted at deploy time
-    Password,
-    /// Absolute path to SSH private key file
-    Key(PathBuf),
-}
-
-/// Lifecycle status of a deployment
-#[derive(Serialize, Deserialize, Debug)]
-pub enum DeploymentStatus {
-    Idle,
-    Starting,
-    Running,
-    Stopped,
 }

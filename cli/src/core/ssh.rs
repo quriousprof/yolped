@@ -9,16 +9,16 @@ use std::{
 use anyhow::{bail, Context, Result};
 use ssh2::Session;
 
-use super::{logger, models::deployment::{RemoteServer, SshAuth}};
+use super::{logger, models::config::{ServerConfig, SshAuth}};
 
 pub struct SshConnection {
     session: Session,
 }
 
 impl SshConnection {
-    pub fn connect(server: &RemoteServer) -> Result<Self> {
-        let addr = format!("{}:22", server.ip);
-        logger::info(&format!("Connecting to {}@{}...", server.user, server.ip));
+    pub fn connect(server: &ServerConfig) -> Result<Self> {
+        let addr = format!("{}:22", server.host);
+        logger::info(&format!("Connecting to {}@{}...", server.user, server.host));
 
         let tcp = TcpStream::connect(&addr)
             .with_context(|| format!("Failed to connect to {}", addr))?;
@@ -31,7 +31,7 @@ impl SshConnection {
             SshAuth::Password => {
                 let password = rpassword::prompt_password(format!(
                     "Password for {}@{}: ",
-                    server.user, server.ip
+                    server.user, server.host
                 ))?;
                 session
                     .userauth_password(&server.user, &password)
@@ -45,10 +45,10 @@ impl SshConnection {
         }
 
         if !session.authenticated() {
-            bail!("Authentication failed for {}@{}", server.user, server.ip);
+            bail!("Authentication failed for {}@{}", server.user, server.host);
         }
 
-        logger::success(&format!("Connected to {}@{}", server.user, server.ip));
+        logger::success(&format!("Connected to {}@{}", server.user, server.host));
         Ok(Self { session })
     }
 
