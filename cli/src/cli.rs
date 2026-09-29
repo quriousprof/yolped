@@ -32,6 +32,18 @@ pub enum Commands {
         #[arg(long)]
         rebuild: bool,
     },
+    /// Build and push the image to the configured registry
+    Push {
+        /// Additional tags to push alongside those configured in yolped.json
+        #[arg(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+    },
+    /// Build, push, and deploy in one step (requires registry to be configured)
+    Up {
+        /// Additional tags to push alongside those configured in yolped.json
+        #[arg(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+    },
     /// Stream logs for a deployment by name, or for the current directory's project
     Logs {
         /// Name of the deployment (defaults to current directory's yolped.json)
@@ -47,4 +59,6 @@ pub enum Commands {
 pub enum SetupSubcommand {
     /// Reconfigure only the server settings for an existing project
     Server,
+    /// Configure the registry to push images to
+    Registry,
 }

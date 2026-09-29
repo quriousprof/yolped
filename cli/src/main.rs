@@ -12,7 +12,7 @@ use clap::Parser;
 
 use crate::{
     cli::{Cli, Commands, SetupSubcommand},
-    commands::push,
+    commands::{push, up},
     core::{
         models::{
             config::JdConfig,
@@ -33,6 +33,7 @@ fn main() -> Result<()> {
             Some(SetupSubcommand::Registry) => commands::setup::run_registry()?,
         },
         Commands::Push { tags } => push::run(&tags)?,
+        Commands::Up { tags } => up::run(&tags)?,
         Commands::Deploy { down, local, rebuild, .. } => commands::deploy::run(down, local, rebuild)?,
         Commands::Logs { name } => commands::logs::run(name.as_deref())?,
         Commands::List => commands::list::run()?,
