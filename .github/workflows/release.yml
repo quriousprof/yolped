@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   # ── 1. Parse the commit message and decide if this is a release ──────────
   check:
