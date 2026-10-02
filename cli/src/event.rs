@@ -20,9 +20,12 @@ pub enum Event {
 /// Terminal event handler
 #[derive(Debug)]
 pub struct EventHandler {
-    /// Event sender channel
+    /// Kept alive so the channel stays open; the spawned thread holds a clone.
+    #[allow(dead_code)]
     sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
+    /// The thread exits cleanly when the receiver is dropped (channel closes).
+    #[allow(dead_code)]
     handler: thread::JoinHandle<()>,
 }
 
@@ -40,25 +43,36 @@ impl EventHandler {
                         .checked_sub(last_tick.elapsed())
                         .unwrap_or(tick_rate);
 
-                    if event::poll(timeout).expect("unable to poll for event") {
-                        match event::read().expect("unable to read event") {
-                            CrosstermEvent::Key(e) => {
-                                if e.kind == event::KeyEventKind::Press {
-                                    sender.send(Event::Key(e))
-                                } else {
-                                    Ok(()) // ignore KeyEventKind::Release
+                    match event::poll(timeout) {
+                        Err(_) => break,
+                        Ok(true) => {
+                            let ev = match event::read() {
+                                Ok(e) => e,
+                                Err(_) => break,
+                            };
+                            let result = match ev {
+                                CrosstermEvent::Key(e) => {
+                                    if e.kind == event::KeyEventKind::Press {
+                                        sender.send(Event::Key(e))
+                                    } else {
+                                        Ok(()) // ignore KeyEventKind::Release
+                                    }
                                 }
+                                CrosstermEvent::Mouse(e) => sender.send(Event::Mouse(e)),
+                                CrosstermEvent::Resize(w, h) => sender.send(Event::Resize(w, h)),
+                                _ => Ok(()),
+                            };
+                            if result.is_err() {
+                                break;
                             }
-                            CrosstermEvent::Mouse(e) => sender.send(Event::Mouse(e)),
-                            CrosstermEvent::Resize(w, h) => sender.send(Event::Resize(w, h)),
-                            _ => Ok(()),
                         }
-                        .expect("failed to send terminal event")
+                        Ok(false) => {}
                     }
 
-                    // send tick
                     if last_tick.elapsed() >= tick_rate {
-                        sender.send(Event::Tick).expect("failed to send tick event");
+                        if sender.send(Event::Tick).is_err() {
+                            break;
+                        }
                         last_tick = Instant::now();
                     }
                 }

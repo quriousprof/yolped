@@ -1,11 +1,9 @@
-use std::env;
-
 use anyhow::{bail, Result};
 
 use crate::core::{
     models::{
         config::JdConfig,
-        deployment::{Deployment, ServerType},
+        deployment::Deployment,
     },
     registry::Registry,
     remote_runner,
@@ -42,17 +40,11 @@ fn logs_by_name(name: &str) -> Result<()> {
 }
 
 fn stream_logs(config: JdConfig) -> Result<()> {
-    let server = config.server.clone();
-    let deployment = Deployment::new(
-        config.name,
-        config.file_path,
-        String::new(),
-        server.clone(),
-    )?;
+    let deployment = Deployment::new(config.name, config.deploy.file)?;
 
-    match server {
-        ServerType::Local => runner::logs(&deployment),
-        ServerType::Remote(ref remote) => {
+    match config.server {
+        None => runner::logs(&deployment),
+        Some(ref remote) => {
             let conn = SshConnection::connect(remote)?;
             let remote_dir = conn.expand_path(&remote.remote_dir)?;
             remote_runner::logs(&deployment, &conn, &remote_dir)

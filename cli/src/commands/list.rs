@@ -1,7 +1,10 @@
 use colored::Colorize;
 
 use crate::core::{
-    models::{config::JdConfig, deployment::{Deployment, DeploymentType, ServerType}},
+    models::{
+        config::JdConfig,
+        deployment::{parse_file, Deployment, DeploymentType},
+    },
     registry::{DeploymentStatus, Registry},
     runner,
 };
@@ -22,12 +25,7 @@ pub fn run() -> anyhow::Result<()> {
             continue; // never deployed — leave status as Unknown
         }
         if let Ok(config) = JdConfig::load_from(&entry.config_path) {
-            if let Ok(dep) = Deployment::new(
-                config.name,
-                config.file_path,
-                String::new(),
-                ServerType::Local,
-            ) {
+            if let Ok(dep) = Deployment::new(config.name, config.deploy.file.clone()) {
                 entry.status = runner::check_status(&dep);
             }
         }
@@ -65,17 +63,23 @@ pub fn run() -> anyhow::Result<()> {
         for entry in entries {
             match JdConfig::load_from(&entry.config_path) {
                 Ok(config) => {
-                    let kind = match config.deployment_type {
-                        DeploymentType::Dockerfile    => "Dockerfile",
-                        DeploymentType::DockerCompose => "Docker Compose",
+                    let kind = match parse_file(&config.deploy.file) {
+                        Ok(DeploymentType::Dockerfile)    => "Dockerfile",
+                        Ok(DeploymentType::DockerCompose) => "Docker Compose",
+                        Err(_) => "Unknown",
                     };
                     let fmt = |t: Option<chrono::DateTime<chrono::Utc>>| {
                         t.map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
                             .unwrap_or_else(|| "never".to_string())
                     };
 
+                    let project_dir = config.deploy.file
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+
                     println!("    {} {}", "▸".cyan().bold(), config.name.bold());
-                    println!("      project    {}", config.project_dir.display());
+                    println!("      project    {}", project_dir);
                     println!("      type       {}", kind);
                     println!("      config     {}", entry.config_path.display());
                     println!("      built      {}", fmt(entry.last_built_at));
