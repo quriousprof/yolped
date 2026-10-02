@@ -13,7 +13,7 @@ cargo install yolped
 
 **With curl (macOS / Linux):**
 ```bash
-curl -fsSL https://quriousprof.com/yolped/install | sh
+curl -fsSL https://raw.githubusercontent.com/quriousprof/yolped/main/install.sh | sh
 ```
 
 Both install the `yolped` binary to a directory on your `$PATH`.
