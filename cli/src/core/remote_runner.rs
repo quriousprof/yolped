@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::{Path, PathBuf}};
+use std::{collections::HashSet, io::{self, Write}, path::{Path, PathBuf}};
 
 use anyhow::{bail, Context, Result};
 
@@ -297,6 +297,75 @@ pub fn image_exists(deployment: &Deployment, conn: &SshConnection) -> bool {
     conn.image_exists(&deployment.name)
 }
 
+/// Extract the registry hostname from a fully-qualified image name.
+/// `ghcr.io/user/img` → `ghcr.io`, `user/img` → `docker.io`.
+fn registry_host_from_image(image: &str) -> &str {
+    if let Some(slash) = image.find('/') {
+        let host = &image[..slash];
+        if host.contains('.') || host.contains(':') {
+            return host;
+        }
+    }
+    "docker.io"
+}
+
+/// True when the pull output indicates an authentication / authorization failure.
+fn is_auth_error(output: &str) -> bool {
+    let l = output.to_lowercase();
+    l.contains("unauthorized") || l.contains("authentication required") || l.contains("access denied")
+}
+
+/// Scan pull output for an image reference and return the registry host.
+fn extract_registry_from_error(output: &str) -> Option<String> {
+    for word in output.split_whitespace() {
+        let image = word.split(':').next().unwrap_or(word);
+        if image.contains('/') {
+            let host = registry_host_from_image(image);
+            if host != "docker.io" {
+                return Some(host.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Prompt for registry credentials locally, then run `docker login` on the remote
+/// server via stdin — the token is never passed as a shell argument.
+pub fn registry_login(conn: &SshConnection, registry_host: &str) -> Result<()> {
+    logger::info(&format!("Authenticating with {} on remote server...", registry_host));
+    logger::info("Credentials are used once for `docker login` and not stored by yolped.");
+    println!();
+
+    print!("Username: ");
+    io::stdout().flush()?;
+    let mut username = String::new();
+    io::stdin().read_line(&mut username)?;
+    let username = username.trim().to_string();
+    if username.is_empty() {
+        bail!("Username cannot be empty.");
+    }
+
+    let token = rpassword::prompt_password(format!("Access token (never stored): "))?;
+    if token.is_empty() {
+        bail!("Token cannot be empty.");
+    }
+
+    println!();
+    let cmd = format!(
+        "docker login {} --username {} --password-stdin",
+        shell_escape(registry_host),
+        shell_escape(&username),
+    );
+    // Pass the token via channel stdin — it never appears in the remote process list.
+    let code = conn.exec_with_stdin_stream(&cmd, format!("{}\n", token).as_bytes())?;
+    if code != 0 {
+        bail!("docker login failed — check your username and token.");
+    }
+
+    logger::success("Logged in successfully.");
+    Ok(())
+}
+
 /// Pull the deployment image from a registry on the remote server.
 ///
 /// For Dockerfile projects, pulls the image and tags it with the deployment name
@@ -330,13 +399,28 @@ fn pull_dockerfile(
 
     let tag = registry.tags.first().map(|s| s.as_str()).unwrap_or("latest");
     let full_ref = format!("{}:{}", image, tag);
+    let pull_cmd = format!("docker pull {}", shell_escape(&full_ref));
 
     logger::info(&format!("Pulling {}...", full_ref));
     println!();
 
-    let code = conn.exec_stream(&format!("docker pull {}", shell_escape(&full_ref)))?;
+    let (code, output) = conn.exec_stream_capture(&pull_cmd)?;
     if code != 0 {
-        bail!("docker pull failed for '{}' (exit code: {})", full_ref, code);
+        if is_auth_error(&output) {
+            let host = registry_host_from_image(image).to_string();
+            println!();
+            logger::warn(&format!("Not authenticated with {}.", host));
+            registry_login(conn, &host)?;
+            println!();
+            logger::info(&format!("Retrying pull of {}...", full_ref));
+            println!();
+            let (code2, _) = conn.exec_stream_capture(&pull_cmd)?;
+            if code2 != 0 {
+                bail!("docker pull failed after login (exit code: {})", code2);
+            }
+        } else {
+            bail!("docker pull failed for '{}' (exit code: {})", full_ref, code);
+        }
     }
 
     // Tag with the deployment name so `docker run --name <name> <name>` works.
@@ -369,9 +453,24 @@ fn pull_compose(
         shell_escape(&remote_file), shell_escape(&deployment.name)
     );
 
-    let code = conn.exec_stream(&cmd)?;
+    let (code, output) = conn.exec_stream_capture(&cmd)?;
     if code != 0 {
-        bail!("docker compose pull failed (exit code: {})", code);
+        if is_auth_error(&output) {
+            let host = extract_registry_from_error(&output)
+                .unwrap_or_else(|| "the registry".to_string());
+            println!();
+            logger::warn(&format!("Not authenticated with {}.", host));
+            registry_login(conn, &host)?;
+            println!();
+            logger::info("Retrying pull after login...");
+            println!();
+            let (code2, _) = conn.exec_stream_capture(&cmd)?;
+            if code2 != 0 {
+                bail!("docker compose pull failed after login (exit code: {})", code2);
+            }
+        } else {
+            bail!("docker compose pull failed (exit code: {})", code);
+        }
     }
 
     println!();

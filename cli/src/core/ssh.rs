@@ -132,6 +132,149 @@ impl SshConnection {
         .unwrap_or(false)
     }
 
+    /// Execute a command, stream output to the terminal, AND return the combined
+    /// stdout+stderr as a String. Used when the caller needs to inspect the output
+    /// for specific errors (e.g. "unauthorized") after the command finishes.
+    pub fn exec_stream_capture(&self, cmd: &str) -> Result<(i32, String)> {
+        let mut channel = self
+            .session
+            .channel_session()
+            .context("Failed to open SSH channel")?;
+        channel
+            .exec(cmd)
+            .with_context(|| format!("Failed to exec: {}", cmd))?;
+
+        self.session.set_blocking(false);
+
+        let mut buf = [0u8; 4096];
+        let mut sbuf = [0u8; 4096];
+        let mut captured = String::new();
+
+        loop {
+            let mut activity = false;
+
+            match channel.read(&mut buf) {
+                Ok(0) => {}
+                Ok(n) => {
+                    io::stdout().write_all(&buf[..n])?;
+                    io::stdout().flush()?;
+                    captured.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    activity = true;
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    self.session.set_blocking(true);
+                    return Err(e.into());
+                }
+            }
+
+            {
+                let mut stderr = channel.stderr();
+                match stderr.read(&mut sbuf) {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        io::stderr().write_all(&sbuf[..n])?;
+                        io::stderr().flush()?;
+                        captured.push_str(&String::from_utf8_lossy(&sbuf[..n]));
+                        activity = true;
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(e) => {
+                        self.session.set_blocking(true);
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            if channel.eof() && !activity {
+                break;
+            }
+
+            if !activity {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        self.session.set_blocking(true);
+        channel.wait_close().context("Failed to wait for channel close")?;
+        Ok((channel.exit_status()?, captured))
+    }
+
+    /// Execute a command, pipe `stdin_data` to its stdin, then stream stdout+stderr
+    /// to the terminal. Used for `docker login --password-stdin` so the token is
+    /// sent through the encrypted SSH channel rather than appearing in the process list.
+    pub fn exec_with_stdin_stream(&self, cmd: &str, stdin_data: &[u8]) -> Result<i32> {
+        let mut channel = self
+            .session
+            .channel_session()
+            .context("Failed to open SSH channel")?;
+        channel
+            .exec(cmd)
+            .with_context(|| format!("Failed to exec: {}", cmd))?;
+
+        // Write stdin and close it before reading output.
+        // Safe for `docker login --password-stdin` because it reads stdin first
+        // and the token is small enough to fit in the SSH send buffer.
+        channel
+            .write_all(stdin_data)
+            .context("Failed to write stdin to remote command")?;
+        channel
+            .send_eof()
+            .context("Failed to send EOF on remote stdin")?;
+
+        self.session.set_blocking(false);
+
+        let mut buf = [0u8; 4096];
+        let mut sbuf = [0u8; 4096];
+
+        loop {
+            let mut activity = false;
+
+            match channel.read(&mut buf) {
+                Ok(0) => {}
+                Ok(n) => {
+                    io::stdout().write_all(&buf[..n])?;
+                    io::stdout().flush()?;
+                    activity = true;
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    self.session.set_blocking(true);
+                    return Err(e.into());
+                }
+            }
+
+            {
+                let mut stderr = channel.stderr();
+                match stderr.read(&mut sbuf) {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        io::stderr().write_all(&sbuf[..n])?;
+                        io::stderr().flush()?;
+                        activity = true;
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(e) => {
+                        self.session.set_blocking(true);
+                        return Err(e.into());
+                    }
+                }
+            }
+
+            if channel.eof() && !activity {
+                break;
+            }
+
+            if !activity {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        self.session.set_blocking(true);
+        channel.wait_close().context("Failed to wait for channel close")?;
+        Ok(channel.exit_status()?)
+    }
+
     /// Capture stdout of a command as a string (does not print to terminal).
     pub fn exec_output(&self, cmd: &str) -> Result<String> {
         let mut channel = self
