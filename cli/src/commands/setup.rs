@@ -103,7 +103,7 @@ pub fn run() -> Result<()> {
         name,
         version: "0.1.0".to_string(),
         build: BuildConfig { files: vec![], platform },
-        deploy: DeployConfig { file: file_path, args: vec![] },
+        deploy: DeployConfig { file: file_path, args: vec![], overwrite: None },
         server,
         registry: None,
     };

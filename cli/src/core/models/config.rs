@@ -52,6 +52,12 @@ pub struct DeployConfig {
     /// e.g. ["-p", "8000:8000", "--restart", "unless-stopped"]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+    /// Controls what happens when the deploy file already exists on the remote server.
+    ///   false → always keep the existing remote file, skip the prompt
+    ///   true  → always overwrite without prompting
+    ///   omit  → ask each time (default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overwrite: Option<bool>,
 }
 
 /// Registry to push images to.

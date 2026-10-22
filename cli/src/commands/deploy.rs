@@ -26,6 +26,7 @@ pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     let platform = config.build.platform.clone();
     let registry = config.registry.clone();
 
+    let overwrite = config.deploy.overwrite;
     let deployment = Deployment::new(config.name, config.deploy.file)?;
 
     if force_local || server.is_none() {
@@ -36,7 +37,7 @@ pub fn run(down: bool, force_local: bool, rebuild: bool) -> Result<()> {
     logger::info(&format!("Deploying to {}@{}...", remote.user, remote.host));
     println!();
     let conn = SshConnection::connect(&remote)?;
-    run_remote(down, rebuild, &config_path, &deployment, &run_args, &conn, &remote.remote_dir, registry.as_ref())?;
+    run_remote(down, rebuild, &config_path, &deployment, &run_args, &conn, &remote.remote_dir, registry.as_ref(), overwrite)?;
 
     Ok(())
 }
@@ -78,6 +79,7 @@ fn run_remote(
     conn: &SshConnection,
     remote_dir: &str,
     image_registry: Option<&RegistryConfig>,
+    overwrite: Option<bool>,
 ) -> Result<()> {
     let remote_dir = &conn.expand_path(remote_dir)?;
     remote_runner::check_docker(conn)?;
@@ -99,14 +101,14 @@ fn run_remote(
             // Registry-first: pull images from registry, upload compose file if needed
             if matches!(deployment.deployment_type, DeploymentType::DockerCompose) {
                 conn.mkdir_p(remote_dir)?;
-                upload_deploy_file(deployment, conn, remote_dir)?;
+                upload_deploy_file(deployment, conn, remote_dir, overwrite)?;
                 sync_env_files(deployment, conn, remote_dir)?;
                 println!();
             }
             remote_runner::pull_from_registry(deployment, conn, remote_dir, reg)?;
         } else {
             // Build on remote
-            handle_remote_files(deployment, conn, remote_dir)?;
+            handle_remote_files(deployment, conn, remote_dir, overwrite)?;
             let mut reg = Registry::load()?;
             ensure_built_remote(config_path, deployment, conn, remote_dir, &platform, &mut reg)?;
         }
@@ -127,9 +129,9 @@ fn run_remote(
 }
 
 /// Upload the deployment file and (for compose) sync env files to the remote server.
-fn handle_remote_files(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
+fn handle_remote_files(deployment: &Deployment, conn: &SshConnection, remote_dir: &str, overwrite: Option<bool>) -> Result<()> {
     conn.mkdir_p(remote_dir)?;
-    upload_deploy_file(deployment, conn, remote_dir)?;
+    upload_deploy_file(deployment, conn, remote_dir, overwrite)?;
     if matches!(deployment.deployment_type, DeploymentType::DockerCompose) {
         sync_env_files(deployment, conn, remote_dir)?;
     }
@@ -137,8 +139,9 @@ fn handle_remote_files(deployment: &Deployment, conn: &SshConnection, remote_dir
     Ok(())
 }
 
-/// Upload the Dockerfile or docker-compose file, prompting before overwriting.
-fn upload_deploy_file(deployment: &Deployment, conn: &SshConnection, remote_dir: &str) -> Result<()> {
+/// Upload the Dockerfile or docker-compose file.
+/// `overwrite`: None = ask, Some(true) = always overwrite, Some(false) = always keep.
+fn upload_deploy_file(deployment: &Deployment, conn: &SshConnection, remote_dir: &str, overwrite: Option<bool>) -> Result<()> {
     let filename = deployment
         .file_path
         .file_name()
@@ -148,12 +151,24 @@ fn upload_deploy_file(deployment: &Deployment, conn: &SshConnection, remote_dir:
     let remote_file = format!("{}/{}", remote_dir, filename);
 
     if conn.file_exists(&remote_file) {
-        logger::warn(&format!("'{}' already exists on the server.", filename));
-        if confirm(&format!("Overwrite '{}'?", filename), false)? {
+        let should_overwrite = match overwrite {
+            Some(v) => {
+                if v {
+                    logger::info(&format!("Overwriting '{}' (deploy.overwrite = true).", filename));
+                } else {
+                    logger::info(&format!("Keeping existing '{}' (deploy.overwrite = false).", filename));
+                }
+                v
+            }
+            None => {
+                logger::warn(&format!("'{}' already exists on the server.", filename));
+                confirm(&format!("Overwrite '{}'?", filename), false)?
+            }
+        };
+
+        if should_overwrite {
             conn.upload(&deployment.file_path, &remote_file)?;
-            logger::success(&format!("'{}' overwritten.", filename));
-        } else {
-            logger::info(&format!("Keeping existing '{}'.", filename));
+            logger::success(&format!("'{}' uploaded.", filename));
         }
     } else {
         logger::info(&format!("Uploading '{}'...", filename));
